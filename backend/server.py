@@ -15,151 +15,301 @@ db = client[os.environ['DB_NAME']]
 app = FastAPI(title='Atölye360 API')
 api = APIRouter(prefix='/api')
 
+
+class RecipeItem(BaseModel):
+    material_id: str
+    quantity: float = Field(gt=0)
+
+
 class Material(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     category: str = 'Ahşap'
     unit: str = 'm²'
     stock: float = 0
     min_stock: float = 0
-    unit_cost: float = 0
+    unit_cost: float = Field(ge=0, default=0)
     supplier: str = ''
 
+
 class Product(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     category: str = 'Masa'
     status: str = 'Aktif'
-    labor_cost: float = 0
-    margin: float = 30
-    recipe: list = []
+    labor_cost: float = Field(ge=0, default=0)
+    margin: float = Field(ge=0, default=30)
+    recipe: List[RecipeItem] = []
+
 
 class Transaction(BaseModel):
     type: str
-    description: str
-    amount: float
+    description: str = Field(min_length=1)
+    amount: float = Field(gt=0)
     status: str = 'Tamamlandı'
 
+
+class OrderCreate(BaseModel):
+    name: str = Field(min_length=1)
+    customer: str = ''
+    product_id: Optional[str] = None
+    quantity: int = Field(gt=0, default=1)
+    amount: float = Field(ge=0, default=0)
+    status: str = 'Planlandı'
+    due_date: str = ''
+    notes: str = ''
+
+
+class OrderUpdate(BaseModel):
+    status: str = Field(min_length=1)
+
+
 class CustomerCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     phone: str = ''
     address: str = ''
     tax_number: str = ''
     notes: str = ''
 
+
 class CreditSale(BaseModel):
-    description: str
-    amount: float
-    due_date: str
+    description: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    due_date: str = Field(min_length=1)
     promissory_no: str = ''
 
+
 class CustomerPayment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0)
     payment_method: str = 'Nakit'
     note: str = ''
 
-async def docs(collection, limit=100):
-    return await db[collection].find({}, {'_id': 0}).sort('created_at', -1).to_list(limit)
+
+def clean(doc):
+    return {k: v for k, v in doc.items() if k != '_id'}
+
+
+async def docs(collection, limit=200, query=None):
+    return await db[collection].find(query or {}, {'_id': 0}).sort('created_at', -1).to_list(limit)
+
+
+async def calc_product_cost(product):
+    materials = await docs('materials', 500)
+    m_map = {m['id']: m for m in materials}
+    material_cost = 0.0
+    breakdown = []
+    for r in product.get('recipe', []):
+        m = m_map.get(r.get('material_id'))
+        if not m:
+            continue
+        qty = float(r.get('quantity', 0))
+        line = qty * float(m.get('unit_cost', 0))
+        material_cost += line
+        breakdown.append({'material_id': m['id'], 'name': m['name'], 'unit': m['unit'],
+                          'quantity': qty, 'unit_cost': m.get('unit_cost', 0), 'line_cost': round(line, 2)})
+    labor = float(product.get('labor_cost', 0))
+    margin = float(product.get('margin', 30))
+    cost = labor + material_cost
+    return round(cost, 2), round(cost * (1 + margin / 100), 2), round(material_cost, 2), breakdown
+
 
 @api.get('/')
-async def root(): return {'message': 'Atölye360 API hazır'}
+async def root():
+    return {'message': 'Atölye360 API hazır'}
+
 
 @api.get('/dashboard')
 async def dashboard():
     materials = await docs('materials')
     products = await docs('products')
-    transactions = await docs('transactions', 20)
-    orders = await docs('orders', 20)
-    sales = sum(x['amount'] for x in transactions if x.get('type') == 'sale')
+    transactions = await docs('transactions', 40)
+    orders = await docs('orders', 40)
+    sales = sum(x['amount'] for x in transactions if x.get('type') in ('sale', 'credit_sale'))
     expenses = sum(x['amount'] for x in transactions if x.get('type') == 'expense')
     return {'materials': materials, 'products': products, 'transactions': transactions, 'orders': orders,
-            'stats': {'sales': sales, 'expenses': expenses, 'profit': sales-expenses,
+            'stats': {'sales': sales, 'expenses': expenses, 'profit': sales - expenses,
                       'low_stock': sum(1 for x in materials if x.get('stock', 0) <= x.get('min_stock', 0)),
                       'product_count': len(products), 'order_count': len(orders)}}
 
+
 @api.get('/materials')
-async def get_materials(): return await docs('materials')
+async def get_materials():
+    return await docs('materials')
+
 
 @api.post('/materials')
 async def create_material(item: Material):
-    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
-    await db.materials.insert_one(doc); return {k: v for k, v in doc.items() if k != '_id'}
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
+    await db.materials.insert_one(doc)
+    return clean(doc)
+
 
 @api.get('/products')
-async def get_products(): return await docs('products')
+async def get_products():
+    products = await docs('products')
+    for p in products:
+        cost, price, mat_cost, breakdown = await calc_product_cost(p)
+        p['cost'] = cost
+        p['material_cost'] = mat_cost
+        p['suggested_price'] = price
+        p['breakdown'] = breakdown
+    return products
+
 
 @api.post('/products')
 async def create_product(item: Product):
-    doc = item.model_dump(); material_docs = await db.materials.find({}, {'_id': 0}).to_list(100)
-    cost = item.labor_cost + sum((next((m.get('unit_cost', 0) for m in material_docs if m.get('id') == r.get('material_id')), r.get('unit_cost', 0)) * r.get('quantity', 0)) for r in item.recipe)
-    doc.update(id=str(uuid.uuid4()), cost=round(cost, 2), suggested_price=round(cost * (1 + item.margin/100), 2), created_at=datetime.now(timezone.utc).isoformat())
-    await db.products.insert_one(doc); return {k: v for k, v in doc.items() if k != '_id'}
+    doc = item.model_dump()
+    cost, price, mat_cost, breakdown = await calc_product_cost(doc)
+    doc.update(id=str(uuid.uuid4()), cost=cost, material_cost=mat_cost, suggested_price=price,
+               created_at=datetime.now(timezone.utc).isoformat())
+    await db.products.insert_one(doc)
+    return {**clean(doc), 'breakdown': breakdown}
+
 
 @api.get('/transactions')
-async def get_transactions(): return await docs('transactions')
+async def get_transactions():
+    return await docs('transactions')
+
 
 @api.post('/transactions')
 async def create_transaction(item: Transaction):
-    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), date=datetime.now(timezone.utc).strftime('%d.%m.%Y'), created_at=datetime.now(timezone.utc).isoformat())
-    await db.transactions.insert_one(doc); return {k: v for k, v in doc.items() if k != '_id'}
+    if item.type not in ('sale', 'expense'):
+        raise HTTPException(status_code=400, detail='Geçersiz işlem tipi')
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+               created_at=datetime.now(timezone.utc).isoformat())
+    await db.transactions.insert_one(doc)
+    return clean(doc)
+
 
 @api.get('/orders')
-async def get_orders(): return await docs('orders')
+async def get_orders():
+    return await docs('orders')
+
 
 @api.post('/orders')
-async def create_order(item: dict):
-    doc = dict(item); doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
-    await db.orders.insert_one(doc); return {k: v for k, v in doc.items() if k != '_id'}
+async def create_order(item: OrderCreate):
+    doc = item.model_dump()
+    if doc.get('product_id'):
+        product = await db.products.find_one({'id': doc['product_id']}, {'_id': 0})
+        if not product:
+            raise HTTPException(status_code=404, detail='Ürün bulunamadı')
+        doc['product_name'] = product['name']
+        if not doc.get('amount'):
+            doc['amount'] = float(product.get('suggested_price', 0)) * doc['quantity']
+    doc.update(id=str(uuid.uuid4()),
+               date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+               created_at=datetime.now(timezone.utc).isoformat())
+    await db.orders.insert_one(doc)
+    return clean(doc)
+
+
+@api.patch('/orders/{order_id}')
+async def update_order(order_id: str, payload: OrderUpdate):
+    order = await db.orders.find_one({'id': order_id}, {'_id': 0})
+    if not order:
+        raise HTTPException(status_code=404, detail='Sipariş bulunamadı')
+    if order.get('status') == 'Tamamlandı' and payload.status != 'Tamamlandı':
+        raise HTTPException(status_code=400, detail='Tamamlanmış sipariş güncellenemez')
+    stock_updates = []
+    stock_warnings = []
+    if payload.status == 'Tamamlandı' and order.get('status') != 'Tamamlandı' and order.get('product_id'):
+        product = await db.products.find_one({'id': order['product_id']}, {'_id': 0})
+        if product:
+            qty = int(order.get('quantity', 1))
+            for r in product.get('recipe', []):
+                m = await db.materials.find_one({'id': r['material_id']}, {'_id': 0})
+                if not m:
+                    continue
+                need = float(r['quantity']) * qty
+                new_stock = float(m.get('stock', 0)) - need
+                await db.materials.update_one({'id': m['id']}, {'$set': {'stock': round(new_stock, 3)}})
+                stock_updates.append({'material_id': m['id'], 'name': m['name'], 'used': need, 'remaining': round(new_stock, 3)})
+                if new_stock < 0:
+                    stock_warnings.append(f"{m['name']} stoğu eksiye düştü")
+                elif new_stock <= float(m.get('min_stock', 0)):
+                    stock_warnings.append(f"{m['name']} kritik seviyede")
+    await db.orders.update_one({'id': order_id}, {'$set': {'status': payload.status,
+                                                             'completed_at': datetime.now(timezone.utc).isoformat() if payload.status == 'Tamamlandı' else None}})
+    updated = await db.orders.find_one({'id': order_id}, {'_id': 0})
+    return {'order': updated, 'stock_updates': stock_updates, 'warnings': stock_warnings}
+
 
 @api.get('/customers/summary')
 async def customer_summary():
-    customers = await docs('customers')
-    sales = await db.transactions.find({'type': 'credit_sale'}, {'_id': 0}).to_list(1000)
-    payments = await db.customer_payments.find({}, {'_id': 0}).to_list(1000)
+    customers = await docs('customers', 500)
+    sales = await db.transactions.find({'type': 'credit_sale'}, {'_id': 0}).to_list(2000)
+    payments = await db.customer_payments.find({}, {'_id': 0}).to_list(2000)
     result = []
     for customer in customers:
         cid = customer['id']
-        customer_sales = [x for x in sales if x.get('customer_id') == cid]
-        customer_payments = [x for x in payments if x.get('customer_id') == cid]
-        total_purchases = sum(x.get('amount', 0) for x in customer_sales)
-        total_paid = sum(x.get('amount', 0) for x in customer_payments)
-        result.append({**customer, 'total_purchases': total_purchases, 'total_paid': total_paid,
-                       'balance': max(total_purchases - total_paid, 0), 'purchase_count': len(customer_sales),
-                       'last_purchase': customer_sales[-1].get('date') if customer_sales else None})
+        c_sales = [x for x in sales if x.get('customer_id') == cid]
+        c_pay = [x for x in payments if x.get('customer_id') == cid]
+        tp = sum(x.get('amount', 0) for x in c_sales)
+        tpaid = sum(x.get('amount', 0) for x in c_pay)
+        result.append({**customer, 'total_purchases': tp, 'total_paid': tpaid,
+                       'balance': max(tp - tpaid, 0),
+                       'purchase_count': len(c_sales),
+                       'last_purchase': c_sales[-1].get('date') if c_sales else None})
     return {'customers': result, 'stats': {'customer_count': len(result),
              'open_balance': sum(x['balance'] for x in result),
              'credit_sales': sum(x['total_purchases'] for x in result),
              'payments': sum(x['total_paid'] for x in result)}}
 
+
+@api.get('/customers/{customer_id}/history')
+async def customer_history(customer_id: str):
+    customer = await db.customers.find_one({'id': customer_id}, {'_id': 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail='Müşteri bulunamadı')
+    sales = await db.transactions.find({'type': 'credit_sale', 'customer_id': customer_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
+    payments = await db.customer_payments.find({'customer_id': customer_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
+    tp = sum(x.get('amount', 0) for x in sales)
+    tpaid = sum(x.get('amount', 0) for x in payments)
+    return {'customer': customer, 'sales': sales, 'payments': payments,
+            'totals': {'purchases': tp, 'paid': tpaid, 'balance': max(tp - tpaid, 0)}}
+
+
 @api.post('/customers')
 async def create_customer(item: CustomerCreate):
-    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
     await db.customers.insert_one(doc)
-    return {k: v for k, v in doc.items() if k != '_id'}
+    return clean(doc)
+
 
 @api.post('/customers/{customer_id}/credit-sales')
 async def create_credit_sale(customer_id: str, item: CreditSale):
     customer = await db.customers.find_one({'id': customer_id}, {'_id': 0})
     if not customer:
         raise HTTPException(status_code=404, detail='Müşteri bulunamadı')
-    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
-                                        type='credit_sale', sale_type='Senetli', status='Açık',
-                                        date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
-                                        created_at=datetime.now(timezone.utc).isoformat())
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
+               type='credit_sale', sale_type='Senetli', status='Açık',
+               date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+               created_at=datetime.now(timezone.utc).isoformat())
     await db.transactions.insert_one(doc)
-    return {k: v for k, v in doc.items() if k != '_id'}
+    return clean(doc)
+
 
 @api.post('/customers/{customer_id}/payments')
 async def create_customer_payment(customer_id: str, item: CustomerPayment):
     customer = await db.customers.find_one({'id': customer_id}, {'_id': 0})
     if not customer:
         raise HTTPException(status_code=404, detail='Müşteri bulunamadı')
-    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
-                                        date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
-                                        created_at=datetime.now(timezone.utc).isoformat())
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
+               date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+               created_at=datetime.now(timezone.utc).isoformat())
     await db.customer_payments.insert_one(doc)
-    return {k: v for k, v in doc.items() if k != '_id'}
+    return clean(doc)
+
 
 app.include_router(api)
-app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','), allow_methods=['*'], allow_headers=['*'])
+app.add_middleware(CORSMiddleware, allow_credentials=True,
+                   allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+                   allow_methods=['*'], allow_headers=['*'])
+
 
 @app.on_event('shutdown')
-async def shutdown(): client.close()
+async def shutdown():
+    client.close()

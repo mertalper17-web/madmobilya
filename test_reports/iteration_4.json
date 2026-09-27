@@ -1,0 +1,15 @@
+{
+  "summary": "Completed customer/cari backend and frontend workflow testing: customer creation, senetli sale, payment, summary balances, table actions, and mobile layout all passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_customers.py", "/app/test_reports/pytest/customer_results.xml"],
+  "action_items": ["Consider adding server-side validation for non-positive customer sale/payment amounts and required sale fields."],
+  "critical_code_review_comments": ["CustomerPage save() has no user-visible error state if an API request fails; errors are only logged by axios catch behavior.", "Customer summary uses in-memory list aggregation over up to 1000 transactions/payments, which may not scale for large datasets."],
+  "updated_files": ["/app/backend/tests/test_customers.py", "/app/test_reports/iteration_4.json"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_-prefixed customer, sale, and payment records plus UI TEST Customer records for persistence and browser validation.",
+  "retest_needed": false,
+  "should_call_test_agent_after_fix": false,
+  "context_for_next_testing_agent": "Customer page route and full create-sale-payment workflow passed on public URL; desktop and 390px mobile checks passed with no horizontal document overflow.",
+  "rca of the issue": "No blocking issue reproduced. Existing customer implementation correctly calls load() from useEffect and API state refreshes after each successful mutation."
+}
