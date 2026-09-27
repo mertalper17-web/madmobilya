@@ -1,0 +1,23 @@
+{
+  "summary": "Regression testing completed: backend 4/4 passed; dashboard, routes, stat IDs, notifications, and mobile menu/overflow passed. Order POST persists via API, but the browser orders table displayed stale zero-state data after creation. Quick-add remains non-functional.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Dashboard quick-add", "issue": "Clicking Hızlı kayıt has no handler and does not navigate or open a form.", "selector": "[data-testid=quick-add-button]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Order creation and table refresh", "issue": "POST /api/orders returns 200 and the record persists, but the browser orders table continues to render 0 kayıt/empty state after submission and reload.", "affected_selectors": ["[data-testid=add-orders-button]", "[data-testid=save-record-button]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_api_regression.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": ["Implement quick-add navigation or modal flow.", "Fix dashboard data fetching/table refresh so newly persisted orders appear in Siparişler without stale data."],
+  "critical_code_review_comments": ["App loads dashboard data only once and TablePage relies on that snapshot; after mutations it uses window.location.reload(), which can still render stale cached dashboard data. Add explicit refetch/no-cache or local state update and show API errors in the UI."],
+  "updated_files": ["/app/test_reports/iteration_2.json", "/app/test_reports/pytest/pytest_results.xml"],
+  "success_rate": {"backend": "100%", "frontend": "82%"},
+  "seed_data_creation": "Created TEST_-prefixed material, product, sale, and orders through regression/API and UI tests.",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "Navigation, stat uniqueness, notifications, mobile menu, and no horizontal overflow passed. Re-test order table refresh and quick-add after fixes.",
+  "rca of the issue": "The order branch now correctly POSTs to /api/orders and backend persistence is confirmed. The UI still renders the dashboard snapshot held in App state; the observed empty table indicates the post-submit reload/data request is serving or retaining stale dashboard data. Quick-add has no onClick handler in Dashboard."
+}
