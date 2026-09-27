@@ -1,0 +1,32 @@
+{
+  "summary": "Phase 2 end-to-end tested (both backend + frontend). 12/12 pytest tests pass covering stock-entry flow (increases stock, updates cost, no-cost preserves cost, 404), price-history (stock_entry + manual sources), low-stock endpoint, order summary buckets (overdue/due_soon/active/today with days_left), discount CRUD (create/patch/toggle/delete/404), 4 seeded discount tiers, discounted order stores gross+net, configurator estimate with discount returns final_price+discount_amount. Frontend playwright E2E validated: admin login → notifications bell shows red dot + 6 low-stock items, Discounts page create/edit-rate/toggle/delete flows work, Materials stock-entry updates stock (2→12) and cost (₺100→₺150), history modal shows entries & price rows (1 stock_entry row, then after manual edit 2 price rows), Orders summary cards render with correct counts (overdue count incremented after creating past-due order: 0→2), order-discount select shows hint 'Liste tutarı ₺1.000 · İskonto %15 → Net tutar: ₺850' and saves, order-deadline column shows '2 gün kaldı'. Configurator: selecting Bayi %15 discount renders İskontolu Net Fiyat ₺13.750 (suggested ₺16.177 × 0.85) with data-testid config-final-price.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "OrdersPage / ConfiguratorPage", "issues": ["React hydration console warning: '<span> cannot be a child of <option>'. Caused by the visual-editor wrapper injecting <span> inside <option> for dynamic {d.name}·%{d.rate} text. Cosmetic only (functionality works, dropdowns render fine) — likely from build-time instrumentation."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2.py",
+    "/app/test_reports/pytest/phase2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py route order: GET /materials/low-stock is declared AFTER /materials/{material_id}/stock-entries and /materials/{material_id}/price-history — FastAPI resolves in registration order but no conflict because /low-stock does not match the {material_id}/... pattern. Still, consider defining static routes before parameterized ones for clarity.",
+    "server.py orders_summary parse_due uses datetime.fromisoformat which handles 'YYYY-MM-DD' (matches OrdersPage <input type='date'>). Good. But create_order stores due_date as-is; if user posts an empty string, parse_due returns None (safe).",
+    "server.py update_material has no auth-role restriction; any authenticated user can PATCH materials. Consider Depends(warehouse) or Depends(accounting) for tighter control.",
+    "server.py add_stock_entry requires warehouse role (admin/depo) — good; but list_stock_entries and list_price_history have no role dep (any authenticated user). Acceptable but note.",
+    "DiscountTier default active=True but exposed via public UI list; no server-side validation that rate<=100 in Order.discount_rate (already Field(le=100) on OrderCreate — good).",
+    "OrderCreate.due_date is plain string; consider Field pattern validation for ISO date, else parse_due silently drops malformed values."
+  ],
+  "updated_files": ["/app/backend/tests/test_phase2.py"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (all Phase 2 flows verified)"},
+  "test_credentials": "admin / MadMobilya2026!",
+  "seed_data_creation": "Several TEST_ / UITEST_ prefixed materials, orders, and discount tiers created during tests. Discount tiers deleted; materials/orders left in DB (prefixed, non-destructive).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression pytest at /app/backend/tests/test_phase2.py (12 tests, 2.2s). Auth regression at /app/backend/tests/test_auth_and_endpoints.py. All Phase 2 backend + frontend paths validated end-to-end against public URL. The only console warning is a benign hydration warning about <span> inside <option> from the visual-editor build wrapper — not affecting functionality.",
+  "rca of the issue": "N/A — no unresolved issues. On first frontend run the config-final-price element was momentarily missing due to auto-recalculate debounce+network race; re-verified with an extra 3s wait and confirmed it renders correctly (₺13.750 with %15 Bayi discount). Not a real bug."
+}
