@@ -1,0 +1,12 @@
+.login-shell{min-height:100vh;background:radial-gradient(circle at 30% 20%,var(--navy-soft),var(--navy) 55%,#0e1526);display:grid;place-items:center;padding:20px}
+.login-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:36px 32px;box-shadow:0 30px 80px rgba(0,0,0,.35);text-align:center}
+.login-logo{width:88px;height:88px;object-fit:contain;border-radius:50%;background:#0e162b;padding:3px;margin:0 auto 16px;display:block}
+.login-card h1{font:700 26px 'Playfair Display';color:var(--navy);margin:0 0 4px;letter-spacing:.5px}
+.login-sub{color:var(--muted);font-size:12px;margin:0 0 26px;letter-spacing:1.5px;text-transform:uppercase}
+.login-card form{text-align:left}
+.login-card label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:14px}
+.login-card input{display:block;width:100%;margin-top:6px;background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:12px 14px;color:var(--text);outline:0;font-size:14px}
+.login-card input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,135,58,.18)}
+.login-card .primary{width:100%;justify-content:center;padding:13px;margin-top:6px}
+.login-card .primary:disabled{opacity:.6;cursor:not-allowed}
+.login-foot{display:flex;align-items:center;gap:6px;justify-content:center;color:var(--muted);font-size:11px;margin:22px 0 0}

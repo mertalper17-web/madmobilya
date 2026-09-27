@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,14 +8,119 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import os, uuid
 
-from configurator import get_public_templates, estimate, DEFAULT_MATERIALS
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+from configurator import get_public_templates, estimate, DEFAULT_MATERIALS
+from auth import (LoginIn, UserCreate, UserUpdate, ROLES,
+                  hash_pw, verify_pw, create_token, decode_token,
+                  get_current_user_from, seed_admin, COOKIE_MAX_AGE)
+
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
-app = FastAPI(title='Atölye360 API')
+app = FastAPI(title='MAD Mobilya API')
 api = APIRouter(prefix='/api')
+
+
+# ---- auth dependencies ----
+async def current_user(request: Request):
+    return await get_current_user_from(request, db)
+
+
+def require_roles(*allowed: str):
+    async def _dep(user=Depends(current_user)):
+        if user.get("role") not in allowed:
+            raise HTTPException(status_code=403, detail=f"Bu işlem için yetkiniz yok ({', '.join(allowed)} gerekli)")
+        return user
+    return _dep
+
+
+admin_only = require_roles("admin")
+warehouse = require_roles("admin", "depo")
+accounting = require_roles("admin", "muhasebe")
+shipping = require_roles("admin", "sevkiyat", "muhasebe")
+
+
+# ---- auth endpoints ----
+@api.post('/auth/login')
+async def login(payload: LoginIn, response: Response):
+    user = await db.users.find_one({"username": payload.username})
+    if not user or not verify_pw(payload.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Kullanıcı adı veya şifre hatalı")
+    if not user.get("active", True):
+        raise HTTPException(status_code=403, detail="Hesabınız pasif durumda")
+    token = create_token(user["id"], user["username"], user["role"])
+    response.set_cookie("access_token", token, httponly=True, secure=True,
+                        samesite="none", max_age=COOKIE_MAX_AGE, path="/")
+    return {"user": {"id": user["id"], "username": user["username"],
+                     "name": user.get("name", ""), "role": user["role"]}, "token": token}
+
+
+@api.post('/auth/logout')
+async def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    return {"ok": True}
+
+
+@api.get('/auth/me')
+async def me(user=Depends(current_user)):
+    return user
+
+
+# ---- user management (admin only) ----
+@api.get('/users')
+async def list_users(user=Depends(admin_only)):
+    return await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(200)
+
+
+@api.post('/users')
+async def create_user(payload: UserCreate, user=Depends(admin_only)):
+    if payload.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"Geçersiz rol. Seçenekler: {', '.join(ROLES)}")
+    if await db.users.find_one({"username": payload.username}):
+        raise HTTPException(status_code=409, detail="Bu kullanıcı adı zaten kayıtlı")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "username": payload.username, "name": payload.name or payload.username,
+        "role": payload.role, "active": payload.active,
+        "password_hash": hash_pw(payload.password),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    return {k: v for k, v in doc.items() if k not in ("_id", "password_hash")}
+
+
+@api.patch('/users/{user_id}')
+async def update_user(user_id: str, payload: UserUpdate, user=Depends(admin_only)):
+    updates = {}
+    p = payload.model_dump(exclude_unset=True)
+    if "name" in p: updates["name"] = p["name"]
+    if "active" in p: updates["active"] = p["active"]
+    if "role" in p:
+        if p["role"] not in ROLES:
+            raise HTTPException(status_code=400, detail="Geçersiz rol")
+        updates["role"] = p["role"]
+    if p.get("password"): updates["password_hash"] = hash_pw(p["password"])
+    if not updates:
+        raise HTTPException(status_code=400, detail="Güncellenecek alan yok")
+    r = await db.users.update_one({"id": user_id}, {"$set": updates})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    return await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+
+
+@api.delete('/users/{user_id}')
+async def delete_user(user_id: str, user=Depends(admin_only)):
+    if user["id"] == user_id:
+        raise HTTPException(status_code=400, detail="Kendinizi silemezsiniz")
+    r = await db.users.delete_one({"id": user_id})
+    if not r.deleted_count:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    return {"ok": True}
+
+
+# ---- protect existing routes ----
+protected = Depends(current_user)
 
 
 class RecipeItem(BaseModel):
@@ -423,6 +528,29 @@ app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
                    allow_methods=['*'], allow_headers=['*'])
+
+
+PUBLIC_PATHS = {'/api/', '/api/auth/login', '/api/auth/logout'}
+
+
+@app.middleware('http')
+async def auth_gate(request: Request, call_next):
+    p = request.url.path
+    if request.method == 'OPTIONS' or not p.startswith('/api/') or p in PUBLIC_PATHS:
+        return await call_next(request)
+    # verify token exists; get_current_user_from raises HTTPException handled by FastAPI
+    try:
+        user = await get_current_user_from(request, db)
+        request.state.user = user
+    except HTTPException as e:
+        from starlette.responses import JSONResponse
+        return JSONResponse({'detail': e.detail}, status_code=e.status_code)
+    return await call_next(request)
+
+
+@app.on_event('startup')
+async def startup():
+    await seed_admin(db)
 
 
 @app.on_event('shutdown')

@@ -1,29 +1,36 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { BrowserRouter, NavLink, Routes, Route, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator } from 'lucide-react';
+import { BrowserRouter, NavLink, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator, Users, LogOut } from 'lucide-react';
 import CustomerPage from '@/CustomerPage';
 import ProductsPage from '@/ProductsPage';
 import OrdersPage from '@/OrdersPage';
 import ConfiguratorPage from '@/ConfiguratorPage';
+import UsersPage from '@/UsersPage';
+import LoginPage from '@/LoginPage';
+import { AuthProvider, useAuth, canAccess } from '@/AuthContext';
 import '@/App.css';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n = 0) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n);
-const nav = [
-  { to: '/', label: 'Genel Bakış', icon: LayoutDashboard },
-  { to: '/configurator', label: 'Teklif Hazırla', icon: Calculator },
-  { to: '/products', label: 'Ürünler & Reçeteler', icon: Package },
-  { to: '/materials', label: 'Malzemeler', icon: Boxes },
-  { to: '/customers', label: 'Müşteriler & Cari', icon: UserRound },
-  { to: '/orders', label: 'Siparişler', icon: ClipboardList },
-  { to: '/sales', label: 'Satışlar', icon: ShoppingCart },
-  { to: '/expenses', label: 'Giderler', icon: ReceiptText },
+const NAV = [
+  { to: '/', label: 'Genel Bakış', icon: LayoutDashboard, key: 'dashboard' },
+  { to: '/configurator', label: 'Teklif Hazırla', icon: Calculator, key: 'configurator' },
+  { to: '/products', label: 'Ürünler & Reçeteler', icon: Package, key: 'products' },
+  { to: '/materials', label: 'Malzemeler', icon: Boxes, key: 'materials' },
+  { to: '/customers', label: 'Müşteriler & Cari', icon: UserRound, key: 'customers' },
+  { to: '/orders', label: 'Siparişler', icon: ClipboardList, key: 'orders' },
+  { to: '/sales', label: 'Satışlar', icon: ShoppingCart, key: 'sales' },
+  { to: '/expenses', label: 'Giderler', icon: ReceiptText, key: 'expenses' },
+  { to: '/users', label: 'Kullanıcılar', icon: Users, key: 'users' },
 ];
+const ROLE_LABEL = { admin: 'Yönetici', muhasebe: 'Muhasebe', depo: 'Depo', sevkiyat: 'Sevkiyat', montaj: 'Montaj' };
 
 function Shell({ children }) {
   const [open, setOpen] = useState(false); const [notice, setNotice] = useState(false); const loc = useLocation();
-  const title = nav.find(x => x.to === loc.pathname)?.label || 'Genel Bakış';
+  const { user, logout } = useAuth();
+  const items = NAV.filter(n => canAccess(user, n.key));
+  const title = items.find(x => x.to === loc.pathname)?.label || 'Genel Bakış';
   return <div className="app-shell">
     <aside className={open ? 'sidebar open' : 'sidebar'}>
       <div className="brand">
@@ -31,16 +38,23 @@ function Shell({ children }) {
         <div className="brand-text"><b>MAD<span> MOBİLYA</span></b><small>Kalite · Tasarım · Güven</small></div>
         <button className="close-menu" onClick={() => setOpen(false)} data-testid="close-menu-button"><X size={18}/></button>
       </div>
-      <nav>{nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)} className={({ isActive }) => isActive ? 'active' : ''} data-testid={`nav-${label.toLowerCase().replaceAll(' ', '-').replaceAll('&', 'and')}`}><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
-      <div className="sidebar-foot"><div className="avatar">MM</div><div><b>MAD Mobilya</b><small>Yönetici hesabı</small></div></div>
+      <nav>{items.map(({ to, label, icon: Icon, key }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)} className={({ isActive }) => isActive ? 'active' : ''} data-testid={`nav-${key}`}><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
+      <div className="sidebar-foot">
+        <div className="avatar">{(user?.name || user?.username || 'M').slice(0, 2).toUpperCase()}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{user?.name || user?.username}</b>
+          <small>{ROLE_LABEL[user?.role] || user?.role}</small>
+        </div>
+        <button className="icon-btn" onClick={logout} aria-label="Çıkış" title="Çıkış Yap" data-testid="logout-button" style={{ background: 'transparent', border: 0, color: '#c4bfae' }}><LogOut size={16}/></button>
+      </div>
     </aside>
     <main className="main">
       <header>
         <button className="menu-btn" onClick={() => setOpen(true)} data-testid="open-menu-button"><Menu/></button>
-        <div><p className="eyebrow">MAD MOBİLYA · İŞLETME PANELİ</p><h1>{title}</h1></div>
+        <div><p className="eyebrow">MAD MOBİLYA · {ROLE_LABEL[user?.role]?.toUpperCase() || 'PANEL'}</p><h1>{title}</h1></div>
         <div className="header-actions">
           <div className="search"><Search size={16}/><input placeholder="Ara..." data-testid="global-search-input"/></div>
-          <button className="icon-btn" onClick={() => setNotice(!notice)} aria-label="Bildirimleri aç" data-testid="notifications-button"><Bell size={18}/><em/></button>
+          <button className="icon-btn" onClick={() => setNotice(!notice)} aria-label="Bildirimler" data-testid="notifications-button"><Bell size={18}/><em/></button>
           {notice && <span className="notice-popover" data-testid="notifications-popover">Yeni bildirim yok</span>}
         </div>
       </header>
@@ -57,17 +71,18 @@ function Stat({ label, value, change, positive = true, accent }) {
 }
 
 function Dashboard({ data }) {
+  const { user } = useAuth();
   const t = data.transactions || [];
   return <>
     <section className="welcome">
-      <div><span className="tag">MAD MOBİLYA · KONTROL PANELİ</span><h2>Hoş geldiniz, <span>MAD Mobilya.</span></h2><p>Atölyenizin bugünkü performansına birlikte bakalım.</p></div>
-      <img src="https://images.unsplash.com/photo-1712171984530-e25a4aaa46dd?q=85&fm=jpg&crop=entropy&cs=srgb" alt="Atölyede ahşap masa" data-testid="workshop-image"/>
+      <div><span className="tag">MAD MOBİLYA · KONTROL PANELİ</span><h2>Hoş geldiniz, <span>{user?.name || user?.username}</span></h2><p>Atölyenizin bugünkü performansına birlikte bakalım.</p></div>
+      <img src="https://images.unsplash.com/photo-1712171984530-e25a4aaa46dd?q=85&fm=jpg&crop=entropy&cs=srgb" alt="Atölye" data-testid="workshop-image"/>
     </section>
     <div className="stats">
-      <Stat label="Bu ay satış" value={money(data.stats?.sales)} change="12.8%" accent="#d8a15d"/>
-      <Stat label="Toplam gider" value={money(data.stats?.expenses)} change="4.2%" positive={false} accent="#e27861"/>
-      <Stat label="Net kâr" value={money(data.stats?.profit)} change="18.6%" accent="#9acb9b"/>
-      <Stat label="Aktif sipariş" value={data.stats?.order_count || 0} change="3 yeni" accent="#d8a15d"/>
+      <Stat label="Bu ay satış" value={money(data.stats?.sales)} change="12.8%" accent="#b8873a"/>
+      <Stat label="Toplam gider" value={money(data.stats?.expenses)} change="4.2%" positive={false} accent="#c6553e"/>
+      <Stat label="Net kâr" value={money(data.stats?.profit)} change="18.6%" accent="#3e8054"/>
+      <Stat label="Aktif sipariş" value={data.stats?.order_count || 0} change="3 yeni" accent="#b8873a"/>
     </div>
     <div className="grid-main">
       <section className="panel chart-panel">
@@ -100,10 +115,10 @@ function Dashboard({ data }) {
         {!(data.materials || []).length && <div className="empty">Henüz malzeme yok.</div>}
       </section>
       <section className="panel spotlight">
-        <div className="spot-img"><img src="https://images.unsplash.com/photo-1546484396-fb3fc6f95f98?q=85&fm=jpg&crop=entropy&cs=srgb" alt="Ahşap dokusu"/></div>
-        <div><span className="eyebrow">ATÖLYE NOTU</span><h3>Sipariş tamamlanınca stok otomatik düşer</h3>
-          <p>Siparişi "Tamamlandı" olarak işaretlediğinizde ürün reçetesindeki malzemeler otomatik olarak stoktan düşülür.</p>
-          <NavLink to="/orders" className="text-link" data-testid="review-materials-link">Siparişleri yönet →</NavLink></div>
+        <div className="spot-img"><img src="https://images.unsplash.com/photo-1546484396-fb3fc6f95f98?q=85&fm=jpg&crop=entropy&cs=srgb" alt="Ahşap"/></div>
+        <div><span className="eyebrow">İPUCU</span><h3>Konfigüratörle ürün maliyeti hesaplayın</h3>
+          <p>Ölçü ve seçenekleri girin, güncel malzeme fiyatınıza göre maliyet ve satış fiyatı anında çıksın.</p>
+          <NavLink to="/configurator" className="text-link">Konfigüratöre git →</NavLink></div>
       </section>
     </div>
   </>;
@@ -113,7 +128,6 @@ function TablePage({ type, data, refresh }) {
   const isMaterials = type === 'materials';
   const items = isMaterials ? data.materials : data.transactions?.filter(x => type === 'sales' ? (x.type === 'sale' || x.type === 'credit_sale') : x.type === 'expense');
   const [modal, setModal] = useState(false); const [name, setName] = useState(''); const [amount, setAmount] = useState(''); const [error, setError] = useState('');
-
   const add = async () => {
     setError('');
     try {
@@ -128,9 +142,7 @@ function TablePage({ type, data, refresh }) {
       setModal(false); setName(''); setAmount(''); refresh();
     } catch (e) { setError(e.response?.data?.detail?.[0]?.msg || 'Kayıt eklenemedi.'); }
   };
-
   const headers = isMaterials ? ['Malzeme', 'Kategori', 'Stok', 'Birim maliyet', 'Tedarikçi'] : ['Açıklama', 'Tarih', 'Tutar', 'Durum'];
-
   return <>
     <div className="page-toolbar">
       <div><p className="page-note">{items?.length || 0} kayıt</p>
@@ -151,14 +163,14 @@ function TablePage({ type, data, refresh }) {
           <td><span className="pill success">{x.status}</span></td>
         </>}
       </tr>)}</tbody></table>
-      {!items?.length && <div className="empty">Henüz kayıt bulunmuyor. Yeni kayıt ekleyerek başlayın.</div>}
+      {!items?.length && <div className="empty">Henüz kayıt bulunmuyor.</div>}
     </div></section>
     {modal && <div className="modal-backdrop" onClick={() => setModal(false)}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={() => setModal(false)} data-testid="close-modal-button"><X/></button>
         <span className="eyebrow">YENİ KAYIT</span>
         <h3>{isMaterials ? 'Malzeme ekle' : type === 'sales' ? 'Satış ekle' : 'Gider ekle'}</h3>
-        {error && <div className="form-error" role="alert" data-testid="record-form-error">{error}</div>}
+        {error && <div className="form-error" data-testid="record-form-error">{error}</div>}
         <label>Ad / açıklama<input autoFocus value={name} onChange={e => setName(e.target.value)} data-testid="record-name-input"/></label>
         <label>{isMaterials ? 'Birim maliyet (₺)' : 'Tutar (₺)'}<input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} data-testid="record-amount-input"/></label>
         <button className="primary full" onClick={add} data-testid="save-record-button">Kaydet</button>
@@ -167,19 +179,31 @@ function TablePage({ type, data, refresh }) {
   </>;
 }
 
-function App() {
+function Protected() {
+  const { user } = useAuth();
   const [data, setData] = useState({ stats: {} });
-  const refresh = () => axios.get(`${API}/dashboard?fresh=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } }).then(r => setData(r.data)).catch(console.error);
-  useEffect(() => { refresh(); }, []);
-  return <BrowserRouter><Shell><Routes>
+  const refresh = () => axios.get(`${API}/dashboard?fresh=${Date.now()}`).then(r => setData(r.data)).catch(() => {});
+  useEffect(() => { if (user) refresh(); }, [user]);
+
+  if (user === undefined) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', color: 'var(--muted)' }}>Yükleniyor...</div>;
+  if (!user) return <LoginPage/>;
+
+  const guard = (key, node) => canAccess(user, key) ? node : <Navigate to="/" replace/>;
+
+  return <Shell><Routes>
     <Route path="/" element={<Dashboard data={data}/>}/>
-    <Route path="/configurator" element={<ConfiguratorPage/>}/>
-    <Route path="/products" element={<ProductsPage/>}/>
-    <Route path="/materials" element={<TablePage type="materials" data={data} refresh={refresh}/>}/>
-    <Route path="/customers" element={<CustomerPage/>}/>
-    <Route path="/orders" element={<OrdersPage/>}/>
-    <Route path="/sales" element={<TablePage type="sales" data={data} refresh={refresh}/>}/>
-    <Route path="/expenses" element={<TablePage type="expenses" data={data} refresh={refresh}/>}/>
-  </Routes></Shell></BrowserRouter>;
+    <Route path="/configurator" element={guard('configurator', <ConfiguratorPage/>)}/>
+    <Route path="/products" element={guard('products', <ProductsPage/>)}/>
+    <Route path="/materials" element={guard('materials', <TablePage type="materials" data={data} refresh={refresh}/>)}/>
+    <Route path="/customers" element={guard('customers', <CustomerPage/>)}/>
+    <Route path="/orders" element={guard('orders', <OrdersPage/>)}/>
+    <Route path="/sales" element={guard('sales', <TablePage type="sales" data={data} refresh={refresh}/>)}/>
+    <Route path="/expenses" element={guard('expenses', <TablePage type="expenses" data={data} refresh={refresh}/>)}/>
+    <Route path="/users" element={guard('users', <UsersPage/>)}/>
+    <Route path="*" element={<Navigate to="/" replace/>}/>
+  </Routes></Shell>;
 }
-export default App;
+
+export default function App() {
+  return <BrowserRouter><AuthProvider><Protected/></AuthProvider></BrowserRouter>;
+}
