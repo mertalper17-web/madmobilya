@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { BrowserRouter, NavLink, Routes, Route, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound } from 'lucide-react';
+import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator } from 'lucide-react';
 import CustomerPage from '@/CustomerPage';
 import ProductsPage from '@/ProductsPage';
 import OrdersPage from '@/OrdersPage';
+import ConfiguratorPage from '@/ConfiguratorPage';
 import '@/App.css';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n = 0) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n);
 const nav = [
   { to: '/', label: 'Genel Bakış', icon: LayoutDashboard },
+  { to: '/configurator', label: 'Teklif Hazırla', icon: Calculator },
   { to: '/products', label: 'Ürünler & Reçeteler', icon: Package },
   { to: '/materials', label: 'Malzemeler', icon: Boxes },
   { to: '/customers', label: 'Müşteriler & Cari', icon: UserRound },
@@ -171,6 +173,7 @@ function App() {
   useEffect(() => { refresh(); }, []);
   return <BrowserRouter><Shell><Routes>
     <Route path="/" element={<Dashboard data={data}/>}/>
+    <Route path="/configurator" element={<ConfiguratorPage/>}/>
     <Route path="/products" element={<ProductsPage/>}/>
     <Route path="/materials" element={<TablePage type="materials" data={data} refresh={refresh}/>}/>
     <Route path="/customers" element={<CustomerPage/>}/>

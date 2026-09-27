@@ -5,8 +5,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import os, uuid
+
+from configurator import get_public_templates, estimate, DEFAULT_MATERIALS
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,6 +31,18 @@ class Material(BaseModel):
     min_stock: float = 0
     unit_cost: float = Field(ge=0, default=0)
     supplier: str = ''
+    role: str = ''
+
+
+class MaterialUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    stock: Optional[float] = None
+    min_stock: Optional[float] = None
+    unit_cost: Optional[float] = Field(default=None, ge=0)
+    supplier: Optional[str] = None
+    role: Optional[str] = None
 
 
 class Product(BaseModel):
@@ -143,15 +157,116 @@ async def create_material(item: Material):
     return clean(doc)
 
 
+@api.patch('/materials/{material_id}')
+async def update_material(material_id: str, payload: MaterialUpdate):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail='Güncellenecek alan yok')
+    r = await db.materials.update_one({'id': material_id}, {'$set': updates})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail='Malzeme bulunamadı')
+    doc = await db.materials.find_one({'id': material_id}, {'_id': 0})
+    return doc
+
+
+# ------------------- CONFIGURATOR -------------------
+
+class EstimateRequest(BaseModel):
+    product_type: str = Field(min_length=1)
+    dims: Dict[str, float]
+    options: Dict[str, Any] = {}
+    labor: float = Field(ge=0, default=0)
+    margin: float = Field(ge=0, default=40)
+
+
+class SaveConfiguredProduct(BaseModel):
+    name: str = Field(min_length=1)
+    product_type: str
+    dims: Dict[str, float]
+    options: Dict[str, Any] = {}
+    labor: float = Field(ge=0, default=0)
+    margin: float = Field(ge=0, default=40)
+
+
+@api.get('/configurator/templates')
+async def configurator_templates():
+    return {'templates': get_public_templates()}
+
+
+@api.post('/configurator/seed-materials')
+async def seed_default_materials():
+    """Idempotent: create default materials for missing roles."""
+    existing = await db.materials.find({'role': {'$ne': ''}}, {'_id': 0}).to_list(200)
+    have_roles = {m.get('role') for m in existing if m.get('role')}
+    added = []
+    for m in DEFAULT_MATERIALS:
+        if m['role'] in have_roles:
+            continue
+        doc = {**m, 'stock': 0, 'min_stock': 0, 'supplier': '',
+               'id': str(uuid.uuid4()), 'created_at': datetime.now(timezone.utc).isoformat()}
+        await db.materials.insert_one(doc)
+        added.append(clean(doc))
+    return {'added': added, 'count': len(added)}
+
+
+@api.post('/configurator/estimate')
+async def configurator_estimate(req: EstimateRequest):
+    materials = await db.materials.find({}, {'_id': 0}).to_list(500)
+    try:
+        result = estimate(req.product_type, req.dims, req.options, req.labor, req.margin, materials)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@api.post('/configurator/save')
+async def configurator_save(req: SaveConfiguredProduct):
+    materials = await db.materials.find({}, {'_id': 0}).to_list(500)
+    try:
+        result = estimate(req.product_type, req.dims, req.options, req.labor, req.margin, materials)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # store as product with 'config' snapshot
+    doc = {
+        'id': str(uuid.uuid4()),
+        'name': req.name,
+        'category': req.product_type,
+        'status': 'Aktif',
+        'labor_cost': req.labor,
+        'margin': req.margin,
+        'recipe': [],  # legacy field kept empty
+        'config': {'product_type': req.product_type, 'dims': req.dims, 'options': req.options},
+        'cost': result['cost'],
+        'material_cost': result['material_cost'],
+        'suggested_price': result['suggested_price'],
+        'bom_snapshot': result['bom'],
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.products.insert_one(doc)
+    return clean(doc)
+
+
+# ---------------------------------------------------
+
+
 @api.get('/products')
 async def get_products():
     products = await docs('products')
     for p in products:
-        cost, price, mat_cost, breakdown = await calc_product_cost(p)
-        p['cost'] = cost
-        p['material_cost'] = mat_cost
-        p['suggested_price'] = price
-        p['breakdown'] = breakdown
+        if p.get('config') and p.get('bom_snapshot'):
+            # configured product — recompute with current material prices
+            materials = await db.materials.find({}, {'_id': 0}).to_list(500)
+            try:
+                res = estimate(p['config']['product_type'], p['config']['dims'], p['config'].get('options', {}),
+                               float(p.get('labor_cost', 0)), float(p.get('margin', 30)), materials)
+                p['cost'] = res['cost']; p['material_cost'] = res['material_cost']
+                p['suggested_price'] = res['suggested_price']; p['breakdown'] = res['bom']
+            except Exception:
+                p['breakdown'] = p.get('bom_snapshot', [])
+        else:
+            cost, price, mat_cost, breakdown = await calc_product_cost(p)
+            p['cost'] = cost; p['material_cost'] = mat_cost
+            p['suggested_price'] = price; p['breakdown'] = breakdown
     return products
 
 
