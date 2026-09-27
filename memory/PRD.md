@@ -48,12 +48,21 @@ Implemented and tested 100% (backend 12/12 pytest + full frontend E2E, iteration
 - Backend: server.py (StockEntry/DiscountTier models, stock-entry/price-history/low-stock/orders-summary/discounts endpoints, seed_discounts, log_price_change).
 - Frontend: MaterialsPage.js/.css, DiscountsPage.js/.css, OrdersPage.js (summary+deadline+discount), ConfiguratorPage.js (discount), App.js (nav + low-stock notifications), AuthContext.js (discounts access).
 
-## Phase 3 & 4 — Upcoming
-- P1: Cargo/Shipping API integration.
-- P1: Assembly requests & results tracking.
-- P1: Mobile assembly portal with photo upload (MUST use Emergent Object Storage via integration_expert).
+## Phase 3 — Teklif (Quotes) & Montaj Portalı (Completed, Jun 2026)
+Cargo integration CANCELLED per user. Tested 100% (backend 18/18 pytest + full frontend E2E, iteration_9):
+- **Teklif (Quotes)**: `quotes` collection. Configurator "Teklif olarak kaydet" (müşteri + iskonto) → GET/POST `/api/quotes`, PATCH status (Taslak/Gönderildi/Onaylandı/Reddedildi), POST `/api/quotes/{id}/convert` (siparişe dönüştür, tekrar engelli), DELETE. QuotesPage.js: liste, durum, jsPDF PDF (logolu, BOM+iskonto+net fiyat, ASCII-safe), detay. Erişim: admin/muhasebe/bayi.
+- **Montaj Portalı (Assembly)**: `assembly_jobs`. Siparişte "Montaja Gönder" (POST /api/assembly, tekrar 409). AssemblyPage.js: müşteri/adres/not, durum Bekliyor→Başladı→Tamamlandı (PATCH), fotoğraf yükleme (Emergent Object Storage) + blob görüntüleme (GET /api/files/{path}) + lightbox. Erişim: admin/montaj (oluşturma admin/muhasebe).
+- **Yeni rol `bayi`** + **özel sayfa erişimi**: UsersPage'de per-user `access` listesi; canAccess override (admin daima tümü).
+- **Object Storage**: /app/backend/storage.py, EMERGENT_LLM_KEY backend/.env, APP_NAME=mad-mobilya.
+
+### Phase 3 files
+- Backend: server.py (Quote/Assembly models+endpoints, storage startup init), storage.py, auth.py (bayi role, access field).
+- Frontend: QuotesPage.js/.css, AssemblyPage.js/.css, ConfiguratorPage.js, OrdersPage.js, UsersPage.js, AuthContext.js, App.js.
+
+## Phase 4 — Upcoming
 - P2: Personnel tracking (Puantaj, Sigorta, izin).
-- P2: PDF quote generation from configurator.
+- P2: Assembly photo cache (Photo re-downloads on remount).
+- P3: PDF Türkçe Unicode font (şu an ASCII transliterasyon).
 
 ### Known minor note
 - Benign hydration console warning "<span> cannot be a child of <option>" from visual-editor build wrapper — cosmetic, no functional impact.
