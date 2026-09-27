@@ -11,3 +11,19 @@
 .order-banner .modal-close{background:transparent;border:0}
 .order-modal{width:min(520px,94vw);max-height:92vh;overflow-y:auto}
 @media(max-width:560px){.form-grid{grid-template-columns:1fr}}
+
+.order-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.osum-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;align-items:center;gap:14px}
+.osum-ic{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;flex-shrink:0}
+.osum-ic.today{background:var(--gold-bg);color:var(--gold)}
+.osum-ic.active{background:rgba(26,37,64,.08);color:var(--navy)}
+.osum-ic.soon{background:var(--gold-bg);color:var(--gold)}
+.osum-ic.overdue{background:var(--coral-bg);color:var(--coral)}
+.osum-card b{font-size:22px;color:var(--navy);display:block;line-height:1}
+.osum-card small{color:var(--muted);font-size:11px;display:block;margin-top:4px}
+.deadline{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap}
+.deadline.ok{color:var(--green);background:var(--green-bg)}
+.deadline.soon{color:var(--gold);background:var(--gold-bg)}
+.deadline.today{color:#fff;background:var(--gold)}
+.deadline.overdue{color:var(--coral);background:var(--coral-bg)}
+@media(max-width:860px){.order-summary{grid-template-columns:repeat(2,1fr)}}

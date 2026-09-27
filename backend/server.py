@@ -175,6 +175,30 @@ class OrderCreate(BaseModel):
     status: str = 'Planlandı'
     due_date: str = ''
     notes: str = ''
+    discount_rate: float = Field(ge=0, le=100, default=0)
+    discount_name: str = ''
+
+
+class StockEntry(BaseModel):
+    quantity: float = Field(gt=0)
+    unit_cost: float = Field(ge=0, default=0)
+    supplier: str = ''
+    note: str = ''
+    date: str = ''
+
+
+class DiscountTier(BaseModel):
+    name: str = Field(min_length=1)
+    rate: float = Field(ge=0, le=100, default=0)
+    description: str = ''
+    active: bool = True
+
+
+class DiscountUpdate(BaseModel):
+    name: Optional[str] = None
+    rate: Optional[float] = Field(default=None, ge=0, le=100)
+    description: Optional[str] = None
+    active: Optional[bool] = None
 
 
 class OrderUpdate(BaseModel):
@@ -208,6 +232,16 @@ def clean(doc):
 
 async def docs(collection, limit=200, query=None):
     return await db[collection].find(query or {}, {'_id': 0}).sort('created_at', -1).to_list(limit)
+
+
+async def log_price_change(material, old_cost, new_cost, source):
+    await db.price_history.insert_one({
+        'id': str(uuid.uuid4()), 'material_id': material['id'],
+        'material_name': material.get('name', ''),
+        'old_cost': round(float(old_cost), 2), 'new_cost': round(float(new_cost), 2),
+        'source': source, 'date': datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    })
 
 
 async def calc_product_cost(product):
@@ -267,11 +301,14 @@ async def update_material(material_id: str, payload: MaterialUpdate):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail='Güncellenecek alan yok')
-    r = await db.materials.update_one({'id': material_id}, {'$set': updates})
-    if not r.matched_count:
+    current = await db.materials.find_one({'id': material_id}, {'_id': 0})
+    if not current:
         raise HTTPException(status_code=404, detail='Malzeme bulunamadı')
-    doc = await db.materials.find_one({'id': material_id}, {'_id': 0})
-    return doc
+    old_cost = float(current.get('unit_cost', 0))
+    await db.materials.update_one({'id': material_id}, {'$set': updates})
+    if 'unit_cost' in updates and float(updates['unit_cost']) != old_cost:
+        await log_price_change(current, old_cost, float(updates['unit_cost']), 'manual')
+    return await db.materials.find_one({'id': material_id}, {'_id': 0})
 
 
 # ------------------- CONFIGURATOR -------------------
@@ -282,6 +319,7 @@ class EstimateRequest(BaseModel):
     options: Dict[str, Any] = {}
     labor: float = Field(ge=0, default=0)
     margin: float = Field(ge=0, default=40)
+    discount_rate: float = Field(ge=0, le=100, default=0)
 
 
 class SaveConfiguredProduct(BaseModel):
@@ -321,6 +359,10 @@ async def configurator_estimate(req: EstimateRequest):
         result = estimate(req.product_type, req.dims, req.options, req.labor, req.margin, materials)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if req.discount_rate and req.discount_rate > 0:
+        result['discount_rate'] = req.discount_rate
+        result['final_price'] = round(result['suggested_price'] * (1 - req.discount_rate / 100), 2)
+        result['discount_amount'] = round(result['suggested_price'] - result['final_price'], 2)
     return result
 
 
@@ -416,6 +458,10 @@ async def create_order(item: OrderCreate):
         doc['product_name'] = product['name']
         if not doc.get('amount'):
             doc['amount'] = float(product.get('suggested_price', 0)) * doc['quantity']
+    rate = float(doc.get('discount_rate', 0) or 0)
+    if rate > 0:
+        doc['gross_amount'] = round(float(doc.get('amount', 0)), 2)
+        doc['amount'] = round(float(doc.get('amount', 0)) * (1 - rate / 100), 2)
     doc.update(id=str(uuid.uuid4()),
                date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
                created_at=datetime.now(timezone.utc).isoformat())
@@ -524,6 +570,149 @@ async def create_customer_payment(customer_id: str, item: CustomerPayment):
     return clean(doc)
 
 
+# ------------------- STOCK ENTRIES & PRICE HISTORY -------------------
+
+@api.post('/materials/{material_id}/stock-entries')
+async def add_stock_entry(material_id: str, item: StockEntry, user=Depends(warehouse)):
+    m = await db.materials.find_one({'id': material_id}, {'_id': 0})
+    if not m:
+        raise HTTPException(status_code=404, detail='Malzeme bulunamadı')
+    old_cost = float(m.get('unit_cost', 0))
+    new_stock = round(float(m.get('stock', 0)) + item.quantity, 3)
+    updates = {'stock': new_stock}
+    new_cost = old_cost
+    if item.unit_cost and item.unit_cost > 0:
+        new_cost = float(item.unit_cost)
+        updates['unit_cost'] = new_cost
+    if item.supplier:
+        updates['supplier'] = item.supplier
+    await db.materials.update_one({'id': material_id}, {'$set': updates})
+    date = item.date or datetime.now(timezone.utc).strftime('%d.%m.%Y')
+    entry = {
+        'id': str(uuid.uuid4()), 'material_id': material_id, 'material_name': m.get('name', ''),
+        'quantity': item.quantity, 'unit_cost': new_cost, 'total_cost': round(item.quantity * new_cost, 2),
+        'supplier': item.supplier or m.get('supplier', ''), 'note': item.note, 'date': date,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.stock_entries.insert_one(entry)
+    if new_cost != old_cost:
+        await log_price_change(m, old_cost, new_cost, 'stock_entry')
+    return {'entry': clean(entry), 'stock': new_stock, 'unit_cost': new_cost}
+
+
+@api.get('/materials/{material_id}/stock-entries')
+async def list_stock_entries(material_id: str):
+    return await db.stock_entries.find({'material_id': material_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
+
+
+@api.get('/materials/{material_id}/price-history')
+async def list_price_history(material_id: str):
+    return await db.price_history.find({'material_id': material_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
+
+
+@api.get('/stock-entries')
+async def all_stock_entries():
+    return await docs('stock_entries', 300)
+
+
+@api.get('/materials/low-stock')
+async def low_stock_materials():
+    mats = await db.materials.find({}, {'_id': 0}).to_list(500)
+    low = [m for m in mats if float(m.get('stock', 0)) <= float(m.get('min_stock', 0))]
+    return {'materials': low, 'count': len(low)}
+
+
+# ------------------- ORDER SUMMARY & DEADLINES -------------------
+
+@api.get('/orders/summary')
+async def orders_summary():
+    orders = await docs('orders', 1000)
+    today = datetime.now(timezone.utc).date()
+    today_str = today.strftime('%d.%m.%Y')
+
+    def parse_due(o):
+        d = o.get('due_date')
+        if not d:
+            return None
+        try:
+            return datetime.fromisoformat(d).date()
+        except Exception:
+            return None
+
+    active, overdue, due_soon = [], [], []
+    for o in orders:
+        if o.get('status') in ('Tamamlandı', 'İptal'):
+            continue
+        due = parse_due(o)
+        days = (due - today).days if due else None
+        row = {**o, 'days_left': days}
+        active.append(row)
+        if days is not None and days < 0:
+            overdue.append(row)
+        elif days is not None and days <= 3:
+            due_soon.append(row)
+
+    active.sort(key=lambda r: (r['days_left'] is None, r['days_left'] if r['days_left'] is not None else 0))
+    today_created = [o for o in orders if o.get('date') == today_str]
+    return {
+        'active': active, 'overdue': overdue, 'due_soon': due_soon,
+        'today': today_created,
+        'stats': {
+            'active_count': len(active), 'overdue_count': len(overdue),
+            'due_soon_count': len(due_soon), 'today_count': len(today_created),
+        },
+    }
+
+
+# ------------------- DISCOUNT TIERS -------------------
+
+@api.get('/discounts')
+async def get_discounts():
+    return await db.discounts.find({}, {'_id': 0}).sort('created_at', 1).to_list(100)
+
+
+@api.post('/discounts')
+async def create_discount(item: DiscountTier, user=Depends(accounting)):
+    doc = item.model_dump()
+    doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
+    await db.discounts.insert_one(doc)
+    return clean(doc)
+
+
+@api.patch('/discounts/{discount_id}')
+async def update_discount(discount_id: str, payload: DiscountUpdate, user=Depends(accounting)):
+    updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail='Güncellenecek alan yok')
+    r = await db.discounts.update_one({'id': discount_id}, {'$set': updates})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail='İskonto bulunamadı')
+    return await db.discounts.find_one({'id': discount_id}, {'_id': 0})
+
+
+@api.delete('/discounts/{discount_id}')
+async def delete_discount(discount_id: str, user=Depends(accounting)):
+    r = await db.discounts.delete_one({'id': discount_id})
+    if not r.deleted_count:
+        raise HTTPException(status_code=404, detail='İskonto bulunamadı')
+    return {'ok': True}
+
+
+DEFAULT_DISCOUNTS = [
+    {'name': 'Bayi', 'rate': 15, 'description': 'Bayi / toptan satış iskontosu'},
+    {'name': 'Şube', 'rate': 10, 'description': 'Şube satış iskontosu'},
+    {'name': 'Personel', 'rate': 20, 'description': 'Personel satış iskontosu'},
+    {'name': 'Özel Durum', 'rate': 0, 'description': 'Duruma göre ayarlanabilir özel iskonto'},
+]
+
+
+async def seed_discounts(db):
+    if await db.discounts.count_documents({}) == 0:
+        for d in DEFAULT_DISCOUNTS:
+            await db.discounts.insert_one({**d, 'active': True, 'id': str(uuid.uuid4()),
+                                           'created_at': datetime.now(timezone.utc).isoformat()})
+
+
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
@@ -551,6 +740,7 @@ async def auth_gate(request: Request, call_next):
 @app.on_event('startup')
 async def startup():
     await seed_admin(db)
+    await seed_discounts(db)
 
 
 @app.on_event('shutdown')

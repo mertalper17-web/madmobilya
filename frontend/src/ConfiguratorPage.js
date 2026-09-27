@@ -24,10 +24,13 @@ export default function ConfiguratorPage() {
   const [name, setName] = useState('');
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
+  const [discounts, setDiscounts] = useState([]);
+  const [discountId, setDiscountId] = useState('');
 
   useEffect(() => {
     axios.get(`${API}/configurator/templates`).then(r => setTemplates(r.data.templates));
     axios.post(`${API}/configurator/seed-materials`).catch(() => {});
+    axios.get(`${API}/discounts`).then(r => setDiscounts(r.data.filter(x => x.active))).catch(() => {});
   }, []);
 
   const pick = (tpl) => {
@@ -43,16 +46,18 @@ export default function ConfiguratorPage() {
   const calculate = useCallback(async () => {
     if (!selected) return;
     setLoading(true); setError('');
+    const disc = discounts.find(d => d.id === discountId);
     try {
       const r = await axios.post(`${API}/configurator/estimate`, {
         product_type: selected.key, dims, options,
         labor: Number(labor) || 0, margin: Number(margin) || 0,
+        discount_rate: disc ? Number(disc.rate) : 0,
       });
       setResult(r.data);
     } catch (e) {
       setError(e.response?.data?.detail || 'Hesaplama başarısız');
     } finally { setLoading(false); }
-  }, [selected, dims, options, labor, margin]);
+  }, [selected, dims, options, labor, margin, discountId, discounts]);
 
   // auto-recalculate whenever config changes
   useEffect(() => {
@@ -153,6 +158,12 @@ export default function ConfiguratorPage() {
             <label>İşçilik (₺)<input type="number" min="0" value={labor} onChange={e => setLabor(e.target.value)} data-testid="config-labor"/></label>
             <label>Kâr marjı (%)<input type="number" min="0" value={margin} onChange={e => setMargin(e.target.value)} data-testid="config-margin"/></label>
           </div>
+          <label style={{ display: 'block', marginTop: 12 }}>İskonto uygula
+            <select value={discountId} onChange={e => setDiscountId(e.target.value)} data-testid="config-discount-select" style={{ width: '100%', marginTop: 6 }}>
+              <option value="">— İskonto yok —</option>
+              {discounts.map(d => <option key={d.id} value={d.id}>{d.name} · %{d.rate}</option>)}
+            </select>
+          </label>
         </div>
       </section>
 
@@ -169,6 +180,9 @@ export default function ConfiguratorPage() {
             <div><small>+ İşçilik</small><b>{money(result.labor)}</b></div>
             <div className="line-total"><small>= Toplam Maliyet</small><b>{money(result.cost)}</b></div>
             <div className="line-price"><small>Önerilen Satış Fiyatı</small><b>{money(result.suggested_price)}</b><em>Kâr: {money(result.profit)}</em></div>
+            {result.final_price != null && <div className="line-discount" data-testid="config-final-price">
+              <small>İskontolu Net Fiyat (%{result.discount_rate})</small><b>{money(result.final_price)}</b><em>İskonto: {money(result.discount_amount)}</em>
+            </div>}
           </div>
 
           <div className="bom-list">

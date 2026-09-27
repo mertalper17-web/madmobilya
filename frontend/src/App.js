@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { BrowserRouter, NavLink, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator, Users, LogOut } from 'lucide-react';
+import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator, Users, LogOut, Percent, AlertTriangle } from 'lucide-react';
 import CustomerPage from '@/CustomerPage';
 import ProductsPage from '@/ProductsPage';
 import OrdersPage from '@/OrdersPage';
 import ConfiguratorPage from '@/ConfiguratorPage';
+import MaterialsPage from '@/MaterialsPage';
+import DiscountsPage from '@/DiscountsPage';
 import UsersPage from '@/UsersPage';
 import LoginPage from '@/LoginPage';
 import { AuthProvider, useAuth, canAccess } from '@/AuthContext';
@@ -17,9 +19,10 @@ const NAV = [
   { to: '/', label: 'Genel Bakış', icon: LayoutDashboard, key: 'dashboard' },
   { to: '/configurator', label: 'Teklif Hazırla', icon: Calculator, key: 'configurator' },
   { to: '/products', label: 'Ürünler & Reçeteler', icon: Package, key: 'products' },
-  { to: '/materials', label: 'Malzemeler', icon: Boxes, key: 'materials' },
+  { to: '/materials', label: 'Malzemeler & Stok', icon: Boxes, key: 'materials' },
   { to: '/customers', label: 'Müşteriler & Cari', icon: UserRound, key: 'customers' },
   { to: '/orders', label: 'Siparişler', icon: ClipboardList, key: 'orders' },
+  { to: '/discounts', label: 'İskontolar', icon: Percent, key: 'discounts' },
   { to: '/sales', label: 'Satışlar', icon: ShoppingCart, key: 'sales' },
   { to: '/expenses', label: 'Giderler', icon: ReceiptText, key: 'expenses' },
   { to: '/users', label: 'Kullanıcılar', icon: Users, key: 'users' },
@@ -29,6 +32,10 @@ const ROLE_LABEL = { admin: 'Yönetici', muhasebe: 'Muhasebe', depo: 'Depo', sev
 function Shell({ children }) {
   const [open, setOpen] = useState(false); const [notice, setNotice] = useState(false); const loc = useLocation();
   const { user, logout } = useAuth();
+  const [lowStock, setLowStock] = useState([]);
+  useEffect(() => {
+    axios.get(`${API}/materials/low-stock`).then(r => setLowStock(r.data.materials || [])).catch(() => {});
+  }, [loc.pathname]);
   const items = NAV.filter(n => canAccess(user, n.key));
   const title = items.find(x => x.to === loc.pathname)?.label || 'Genel Bakış';
   return <div className="app-shell">
@@ -54,8 +61,15 @@ function Shell({ children }) {
         <div><p className="eyebrow">MAD MOBİLYA · {ROLE_LABEL[user?.role]?.toUpperCase() || 'PANEL'}</p><h1>{title}</h1></div>
         <div className="header-actions">
           <div className="search"><Search size={16}/><input placeholder="Ara..." data-testid="global-search-input"/></div>
-          <button className="icon-btn" onClick={() => setNotice(!notice)} aria-label="Bildirimler" data-testid="notifications-button"><Bell size={18}/><em/></button>
-          {notice && <span className="notice-popover" data-testid="notifications-popover">Yeni bildirim yok</span>}
+          <button className="icon-btn" onClick={() => setNotice(!notice)} aria-label="Bildirimler" data-testid="notifications-button"><Bell size={18}/>{lowStock.length > 0 && <em/>}</button>
+          {notice && <div className="notice-popover" data-testid="notifications-popover">
+            {lowStock.length ? <>
+              <div className="notice-title"><AlertTriangle size={13}/> Kritik stok ({lowStock.length})</div>
+              {lowStock.slice(0, 6).map(m => <div className="notice-item" key={m.id} data-testid={`lowstock-item-${m.id}`}>
+                <span>{m.name}</span><b>{m.stock} {m.unit}</b></div>)}
+              {canAccess(user, 'materials') && <NavLink to="/materials" className="text-link" onClick={() => setNotice(false)} data-testid="notice-goto-materials">Stok yönetimine git →</NavLink>}
+            </> : 'Kritik stok yok, her şey yolunda.'}
+          </div>}
         </div>
       </header>
       {children}
@@ -194,9 +208,10 @@ function Protected() {
     <Route path="/" element={<Dashboard data={data}/>}/>
     <Route path="/configurator" element={guard('configurator', <ConfiguratorPage/>)}/>
     <Route path="/products" element={guard('products', <ProductsPage/>)}/>
-    <Route path="/materials" element={guard('materials', <TablePage type="materials" data={data} refresh={refresh}/>)}/>
+    <Route path="/materials" element={guard('materials', <MaterialsPage/>)}/>
     <Route path="/customers" element={guard('customers', <CustomerPage/>)}/>
     <Route path="/orders" element={guard('orders', <OrdersPage/>)}/>
+    <Route path="/discounts" element={guard('discounts', <DiscountsPage/>)}/>
     <Route path="/sales" element={guard('sales', <TablePage type="sales" data={data} refresh={refresh}/>)}/>
     <Route path="/expenses" element={guard('expenses', <TablePage type="expenses" data={data} refresh={refresh}/>)}/>
     <Route path="/users" element={guard('users', <UsersPage/>)}/>

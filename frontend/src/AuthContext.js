@@ -46,8 +46,8 @@ export const useAuth = () => useContext(AuthCtx);
 
 // role-based access map
 export const ROLE_ACCESS = {
-  admin:     ['dashboard', 'configurator', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses', 'users'],
-  muhasebe:  ['dashboard', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses'],
+  admin:     ['dashboard', 'configurator', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses', 'discounts', 'users'],
+  muhasebe:  ['dashboard', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses', 'discounts'],
   depo:      ['dashboard', 'materials', 'products', 'orders'],
   sevkiyat:  ['dashboard', 'orders', 'customers'],
   montaj:    ['dashboard', 'orders'],
