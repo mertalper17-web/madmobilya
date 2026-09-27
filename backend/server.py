@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -15,6 +15,7 @@ from configurator import get_public_templates, estimate, DEFAULT_MATERIALS
 from auth import (LoginIn, UserCreate, UserUpdate, ROLES,
                   hash_pw, verify_pw, create_token, decode_token,
                   get_current_user_from, seed_admin, COOKIE_MAX_AGE)
+import storage as objstore
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
@@ -39,6 +40,8 @@ admin_only = require_roles("admin")
 warehouse = require_roles("admin", "depo")
 accounting = require_roles("admin", "muhasebe")
 shipping = require_roles("admin", "sevkiyat", "muhasebe")
+quotes_roles = require_roles("admin", "muhasebe", "bayi")
+assembly_roles = require_roles("admin", "montaj")
 
 
 # ---- auth endpoints ----
@@ -83,6 +86,7 @@ async def create_user(payload: UserCreate, user=Depends(admin_only)):
         "id": str(uuid.uuid4()),
         "username": payload.username, "name": payload.name or payload.username,
         "role": payload.role, "active": payload.active,
+        "access": payload.access or [],
         "password_hash": hash_pw(payload.password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -96,6 +100,7 @@ async def update_user(user_id: str, payload: UserUpdate, user=Depends(admin_only
     p = payload.model_dump(exclude_unset=True)
     if "name" in p: updates["name"] = p["name"]
     if "active" in p: updates["active"] = p["active"]
+    if "access" in p: updates["access"] = p["access"] or []
     if "role" in p:
         if p["role"] not in ROLES:
             raise HTTPException(status_code=400, detail="Geçersiz rol")
@@ -713,6 +718,225 @@ async def seed_discounts(db):
                                            'created_at': datetime.now(timezone.utc).isoformat()})
 
 
+# ------------------- QUOTES (TEKLİF) -------------------
+
+class QuoteCreate(BaseModel):
+    name: str = Field(min_length=1)
+    customer_name: str = ''
+    customer_phone: str = ''
+    customer_address: str = ''
+    product_type: str = Field(min_length=1)
+    dims: Dict[str, float]
+    options: Dict[str, Any] = {}
+    labor: float = Field(ge=0, default=0)
+    margin: float = Field(ge=0, default=40)
+    discount_rate: float = Field(ge=0, le=100, default=0)
+    discount_name: str = ''
+    notes: str = ''
+
+
+class QuoteStatusUpdate(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+QUOTE_STATUSES = ['Taslak', 'Gönderildi', 'Onaylandı', 'Reddedildi']
+
+
+@api.get('/quotes')
+async def get_quotes():
+    return await docs('quotes', 500)
+
+
+@api.post('/quotes')
+async def create_quote(req: QuoteCreate, user=Depends(quotes_roles)):
+    materials = await db.materials.find({}, {'_id': 0}).to_list(500)
+    try:
+        result = estimate(req.product_type, req.dims, req.options, req.labor, req.margin, materials)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=f'Geçersiz ürün/ölçü: {e}')
+    final_price = result['suggested_price']
+    if req.discount_rate and req.discount_rate > 0:
+        final_price = round(result['suggested_price'] * (1 - req.discount_rate / 100), 2)
+    count = await db.quotes.count_documents({})
+    doc = {
+        'id': str(uuid.uuid4()),
+        'quote_no': f"TKF-{datetime.now(timezone.utc).strftime('%y%m')}-{count + 1:04d}",
+        'name': req.name,
+        'customer_name': req.customer_name, 'customer_phone': req.customer_phone,
+        'customer_address': req.customer_address,
+        'product_type': req.product_type, 'dims': req.dims, 'options': req.options,
+        'labor': req.labor, 'margin': req.margin,
+        'material_cost': result['material_cost'], 'cost': result['cost'],
+        'suggested_price': result['suggested_price'],
+        'discount_rate': req.discount_rate, 'discount_name': req.discount_name,
+        'final_price': final_price,
+        'bom': result['bom'], 'notes': req.notes,
+        'status': 'Taslak', 'converted_order_id': None,
+        'date': datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.quotes.insert_one(doc)
+    return clean(doc)
+
+
+@api.patch('/quotes/{quote_id}')
+async def update_quote(quote_id: str, payload: QuoteStatusUpdate, user=Depends(quotes_roles)):
+    updates = {}
+    p = payload.model_dump(exclude_unset=True)
+    if 'status' in p and p['status']:
+        if p['status'] not in QUOTE_STATUSES:
+            raise HTTPException(status_code=400, detail='Geçersiz teklif durumu')
+        updates['status'] = p['status']
+    if 'notes' in p:
+        updates['notes'] = p['notes']
+    if not updates:
+        raise HTTPException(status_code=400, detail='Güncellenecek alan yok')
+    r = await db.quotes.update_one({'id': quote_id}, {'$set': updates})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail='Teklif bulunamadı')
+    return await db.quotes.find_one({'id': quote_id}, {'_id': 0})
+
+
+@api.post('/quotes/{quote_id}/convert')
+async def convert_quote(quote_id: str, user=Depends(quotes_roles)):
+    q = await db.quotes.find_one({'id': quote_id}, {'_id': 0})
+    if not q:
+        raise HTTPException(status_code=404, detail='Teklif bulunamadı')
+    if q.get('converted_order_id'):
+        raise HTTPException(status_code=400, detail='Bu teklif zaten siparişe dönüştürülmüş')
+    order = {
+        'id': str(uuid.uuid4()),
+        'name': q['name'], 'customer': q.get('customer_name', ''),
+        'product_id': None, 'product_name': q['name'],
+        'quantity': 1, 'amount': q.get('final_price', q.get('suggested_price', 0)),
+        'status': 'Planlandı', 'due_date': '', 'notes': q.get('notes', ''),
+        'discount_rate': q.get('discount_rate', 0), 'discount_name': q.get('discount_name', ''),
+        'gross_amount': q.get('suggested_price', 0),
+        'from_quote': q['quote_no'],
+        'date': datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.orders.insert_one(order)
+    await db.quotes.update_one({'id': quote_id}, {'$set': {'converted_order_id': order['id'], 'status': 'Onaylandı'}})
+    return {'order': clean(order), 'quote_id': quote_id}
+
+
+@api.delete('/quotes/{quote_id}')
+async def delete_quote(quote_id: str, user=Depends(quotes_roles)):
+    r = await db.quotes.delete_one({'id': quote_id})
+    if not r.deleted_count:
+        raise HTTPException(status_code=404, detail='Teklif bulunamadı')
+    return {'ok': True}
+
+
+# ------------------- ASSEMBLY (MONTAJ) -------------------
+
+class AssemblyCreate(BaseModel):
+    order_id: Optional[str] = None
+    order_name: str = Field(min_length=1)
+    customer: str = ''
+    address: str = ''
+    note: str = ''
+
+
+class AssemblyUpdate(BaseModel):
+    status: Optional[str] = None
+    note: Optional[str] = None
+
+
+ASSEMBLY_STATUSES = ['Bekliyor', 'Başladı', 'Tamamlandı']
+
+
+@api.get('/assembly')
+async def get_assembly_jobs(user=Depends(current_user)):
+    return await docs('assembly_jobs', 500)
+
+
+@api.post('/assembly')
+async def create_assembly_job(req: AssemblyCreate, user=Depends(accounting)):
+    if req.order_id:
+        existing = await db.assembly_jobs.find_one({'order_id': req.order_id}, {'_id': 0})
+        if existing:
+            raise HTTPException(status_code=409, detail='Bu sipariş zaten montaja gönderilmiş')
+    doc = {
+        'id': str(uuid.uuid4()),
+        'order_id': req.order_id, 'order_name': req.order_name,
+        'customer': req.customer, 'address': req.address, 'note': req.note,
+        'status': 'Bekliyor', 'photos': [],
+        'started_at': None, 'completed_at': None,
+        'date': datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.assembly_jobs.insert_one(doc)
+    return clean(doc)
+
+
+@api.patch('/assembly/{job_id}')
+async def update_assembly_job(job_id: str, payload: AssemblyUpdate, user=Depends(assembly_roles)):
+    job = await db.assembly_jobs.find_one({'id': job_id}, {'_id': 0})
+    if not job:
+        raise HTTPException(status_code=404, detail='Montaj işi bulunamadı')
+    updates = {}
+    p = payload.model_dump(exclude_unset=True)
+    if 'note' in p:
+        updates['note'] = p['note']
+    if p.get('status'):
+        if p['status'] not in ASSEMBLY_STATUSES:
+            raise HTTPException(status_code=400, detail='Geçersiz montaj durumu')
+        updates['status'] = p['status']
+        if p['status'] == 'Başladı' and not job.get('started_at'):
+            updates['started_at'] = datetime.now(timezone.utc).isoformat()
+        if p['status'] == 'Tamamlandı':
+            updates['completed_at'] = datetime.now(timezone.utc).isoformat()
+    if not updates:
+        raise HTTPException(status_code=400, detail='Güncellenecek alan yok')
+    await db.assembly_jobs.update_one({'id': job_id}, {'$set': updates})
+    return await db.assembly_jobs.find_one({'id': job_id}, {'_id': 0})
+
+
+@api.post('/assembly/{job_id}/photos')
+async def upload_assembly_photo(job_id: str, file: UploadFile = File(...),
+                                caption: str = Query(''), user=Depends(assembly_roles)):
+    job = await db.assembly_jobs.find_one({'id': job_id}, {'_id': 0})
+    if not job:
+        raise HTTPException(status_code=404, detail='Montaj işi bulunamadı')
+    ext = file.filename.split('.')[-1].lower() if file.filename and '.' in file.filename else 'jpg'
+    if ext not in ('jpg', 'jpeg', 'png', 'webp', 'gif'):
+        raise HTTPException(status_code=400, detail='Sadece resim dosyası yükleyebilirsiniz')
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail='Fotoğraf 10MB üzerinde olamaz')
+    path = f"{objstore.APP_NAME}/assembly/{job_id}/{uuid.uuid4()}.{ext}"
+    content_type = file.content_type or f'image/{ext}'
+    try:
+        import asyncio
+        result = await asyncio.to_thread(objstore.put_object, path, data, content_type)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f'Fotoğraf yüklenemedi: {e}')
+    photo = {
+        'id': str(uuid.uuid4()), 'storage_path': result['path'],
+        'caption': caption, 'content_type': content_type,
+        'uploaded_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.files.insert_one({**photo, 'job_id': job_id, 'is_deleted': False})
+    await db.assembly_jobs.update_one({'id': job_id}, {'$push': {'photos': photo}})
+    return photo
+
+
+@api.get('/files/{path:path}')
+async def download_file(path: str, user=Depends(current_user)):
+    record = await db.files.find_one({'storage_path': path, 'is_deleted': False}, {'_id': 0})
+    if not record:
+        raise HTTPException(status_code=404, detail='Dosya bulunamadı')
+    try:
+        import asyncio
+        data, content_type = await asyncio.to_thread(objstore.get_object, path)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f'Dosya alınamadı: {e}')
+    return Response(content=data, media_type=record.get('content_type', content_type))
+
+
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
@@ -741,6 +965,11 @@ async def auth_gate(request: Request, call_next):
 async def startup():
     await seed_admin(db)
     await seed_discounts(db)
+    try:
+        objstore.init_storage()
+        print('[storage] initialized')
+    except Exception as e:
+        print(f'[storage] init failed (uploads may retry lazily): {e}')
 
 
 @app.on_event('shutdown')

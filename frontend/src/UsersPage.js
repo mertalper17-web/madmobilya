@@ -10,21 +10,37 @@ const ROLES = [
   { key: 'depo', label: 'Depo' },
   { key: 'sevkiyat', label: 'Sevkiyat' },
   { key: 'montaj', label: 'Montaj' },
+  { key: 'bayi', label: 'Bayi' },
 ];
 const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.key, r.label]));
+const ACCESS_OPTIONS = [
+  { key: 'dashboard', label: 'Genel Bakış' },
+  { key: 'configurator', label: 'Teklif Hazırla' },
+  { key: 'quotes', label: 'Teklifler' },
+  { key: 'products', label: 'Ürünler' },
+  { key: 'materials', label: 'Malzemeler' },
+  { key: 'customers', label: 'Müşteriler' },
+  { key: 'orders', label: 'Siparişler' },
+  { key: 'assembly', label: 'Montaj Portalı' },
+  { key: 'discounts', label: 'İskontolar' },
+  { key: 'sales', label: 'Satışlar' },
+  { key: 'expenses', label: 'Giderler' },
+];
 
 export default function UsersPage() {
   const { user: me } = useAuth();
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(null); // 'new' | user object
-  const [form, setForm] = useState({ username: '', password: '', name: '', role: 'muhasebe', active: true });
+  const [form, setForm] = useState({ username: '', password: '', name: '', role: 'muhasebe', active: true, access: [] });
   const [error, setError] = useState('');
 
   const load = () => axios.get(`${API}/users`).then(r => setList(r.data));
   useEffect(() => { load(); }, []);
 
-  const openNew = () => { setForm({ username: '', password: '', name: '', role: 'muhasebe', active: true }); setError(''); setOpen('new'); };
-  const openEdit = (u) => { setForm({ username: u.username, password: '', name: u.name || '', role: u.role, active: u.active }); setError(''); setOpen(u); };
+  const openNew = () => { setForm({ username: '', password: '', name: '', role: 'muhasebe', active: true, access: [] }); setError(''); setOpen('new'); };
+  const openEdit = (u) => { setForm({ username: u.username, password: '', name: u.name || '', role: u.role, active: u.active, access: u.access || [] }); setError(''); setOpen(u); };
+
+  const toggleAccess = (key) => setForm(f => ({ ...f, access: f.access.includes(key) ? f.access.filter(k => k !== key) : [...f.access, key] }));
 
   const save = async () => {
     setError('');
@@ -32,7 +48,7 @@ export default function UsersPage() {
       if (open === 'new') {
         await axios.post(`${API}/users`, form);
       } else {
-        const upd = { name: form.name, role: form.role, active: form.active };
+        const upd = { name: form.name, role: form.role, active: form.active, access: form.access };
         if (form.password) upd.password = form.password;
         await axios.patch(`${API}/users/${open.id}`, upd);
       }
@@ -84,6 +100,16 @@ export default function UsersPage() {
             {ROLES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
           </select>
         </label>
+        {form.role !== 'admin' && <div className="access-block" data-testid="user-access-block">
+          <span className="eyebrow">ÖZEL SAYFA ERİŞİMİ (opsiyonel)</span>
+          <p className="access-hint">İşaretlerseniz kullanıcı yalnızca seçtiğiniz sayfaları görür. Boş bırakırsanız rolün varsayılan erişimi geçerli olur.</p>
+          <div className="access-grid">
+            {ACCESS_OPTIONS.map(o => <label key={o.key} className={`access-chip${form.access.includes(o.key) ? ' on' : ''}`} data-testid={`access-${o.key}`}>
+              <input type="checkbox" checked={form.access.includes(o.key)} onChange={() => toggleAccess(o.key)}/>
+              <span>{o.label}</span>
+            </label>)}
+          </div>
+        </div>}
         <label>Şifre {open !== 'new' && <span className="optional">boş bırakırsanız değişmez</span>}
           <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} data-testid="user-password-input" placeholder={open !== 'new' ? 'Değiştirmek için yeni şifre' : ''}/>
         </label>

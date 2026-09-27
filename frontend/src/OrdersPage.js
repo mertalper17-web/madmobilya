@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Plus, X, PackageCheck, AlertTriangle, CalendarClock, Clock, CalendarDays } from 'lucide-react';
+import { Plus, X, PackageCheck, AlertTriangle, CalendarClock, Clock, CalendarDays, Wrench } from 'lucide-react';
+import { useAuth } from '@/AuthContext';
 import './OrdersPage.css';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -24,6 +25,8 @@ const deadlineLabel = (n) => {
 };
 
 export default function OrdersPage() {
+  const { user } = useAuth();
+  const canAssembly = ['admin', 'muhasebe'].includes(user?.role);
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [discounts, setDiscounts] = useState([]);
@@ -79,6 +82,19 @@ export default function OrdersPage() {
     }
   };
 
+  const sendToAssembly = async (order) => {
+    setBanner(null);
+    try {
+      await axios.post(`${API}/assembly`, {
+        order_id: order.id, order_name: order.name,
+        customer: order.customer || '', address: '', note: order.notes || '',
+      });
+      setBanner({ kind: 'ok', text: `"${order.name}" montaja gönderildi. Montaj Portalı'nda görünür.` });
+    } catch (e) {
+      setBanner({ kind: 'err', text: e.response?.data?.detail || 'Montaja gönderilemedi' });
+    }
+  };
+
   const st = summary.stats || {};
 
   return <>
@@ -103,7 +119,7 @@ export default function OrdersPage() {
 
     <section className="panel table-panel">
       <div className="table-scroll"><table><thead><tr>
-        <th>Sipariş</th><th>Müşteri</th><th>Ürün</th><th>Adet</th><th>Tutar</th><th>Termin</th><th>Kalan süre</th><th>Durum</th>
+        <th>Sipariş</th><th>Müşteri</th><th>Ürün</th><th>Adet</th><th>Tutar</th><th>Termin</th><th>Kalan süre</th><th>Durum</th>{canAssembly && <th></th>}
       </tr></thead><tbody>
         {orders.map(o => {
           const active = o.status !== 'Tamamlandı' && o.status !== 'İptal';
@@ -124,6 +140,7 @@ export default function OrdersPage() {
                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </td>
+            {canAssembly && <td>{o.status !== 'İptal' && <button className="table-action" onClick={() => sendToAssembly(o)} data-testid={`send-assembly-${o.id}`}><Wrench size={12}/> Montaja Gönder</button>}</td>}
           </tr>;
         })}
       </tbody></table>

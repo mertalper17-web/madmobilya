@@ -13,7 +13,7 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TTL_MIN = 60 * 8   # 8h session
 COOKIE_MAX_AGE = ACCESS_TTL_MIN * 60
 
-ROLES = ["admin", "muhasebe", "depo", "sevkiyat", "montaj"]
+ROLES = ["admin", "muhasebe", "depo", "sevkiyat", "montaj", "bayi"]
 
 
 # ---------- password ----------
@@ -92,6 +92,7 @@ class UserCreate(BaseModel):
     name: str = ""
     role: str = "muhasebe"
     active: bool = True
+    access: Optional[List[str]] = None
 
 
 class UserUpdate(BaseModel):
@@ -99,6 +100,7 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=4)
+    access: Optional[List[str]] = None
 
 
 # ---------- seed ----------

@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { BrowserRouter, NavLink, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator, Users, LogOut, Percent, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Package, Boxes, ShoppingCart, ReceiptText, ClipboardList, Plus, Bell, Search, ArrowUpRight, Menu, X, UserRound, Calculator, Users, LogOut, Percent, AlertTriangle, FileText, Wrench } from 'lucide-react';
 import CustomerPage from '@/CustomerPage';
 import ProductsPage from '@/ProductsPage';
 import OrdersPage from '@/OrdersPage';
 import ConfiguratorPage from '@/ConfiguratorPage';
 import MaterialsPage from '@/MaterialsPage';
 import DiscountsPage from '@/DiscountsPage';
+import QuotesPage from '@/QuotesPage';
+import AssemblyPage from '@/AssemblyPage';
 import UsersPage from '@/UsersPage';
 import LoginPage from '@/LoginPage';
 import { AuthProvider, useAuth, canAccess } from '@/AuthContext';
@@ -18,16 +20,18 @@ const money = (n = 0) => new Intl.NumberFormat('tr-TR', { style: 'currency', cur
 const NAV = [
   { to: '/', label: 'Genel Bakış', icon: LayoutDashboard, key: 'dashboard' },
   { to: '/configurator', label: 'Teklif Hazırla', icon: Calculator, key: 'configurator' },
+  { to: '/quotes', label: 'Teklifler', icon: FileText, key: 'quotes' },
   { to: '/products', label: 'Ürünler & Reçeteler', icon: Package, key: 'products' },
   { to: '/materials', label: 'Malzemeler & Stok', icon: Boxes, key: 'materials' },
   { to: '/customers', label: 'Müşteriler & Cari', icon: UserRound, key: 'customers' },
   { to: '/orders', label: 'Siparişler', icon: ClipboardList, key: 'orders' },
+  { to: '/assembly', label: 'Montaj Portalı', icon: Wrench, key: 'assembly' },
   { to: '/discounts', label: 'İskontolar', icon: Percent, key: 'discounts' },
   { to: '/sales', label: 'Satışlar', icon: ShoppingCart, key: 'sales' },
   { to: '/expenses', label: 'Giderler', icon: ReceiptText, key: 'expenses' },
   { to: '/users', label: 'Kullanıcılar', icon: Users, key: 'users' },
 ];
-const ROLE_LABEL = { admin: 'Yönetici', muhasebe: 'Muhasebe', depo: 'Depo', sevkiyat: 'Sevkiyat', montaj: 'Montaj' };
+const ROLE_LABEL = { admin: 'Yönetici', muhasebe: 'Muhasebe', depo: 'Depo', sevkiyat: 'Sevkiyat', montaj: 'Montaj', bayi: 'Bayi' };
 
 function Shell({ children }) {
   const [open, setOpen] = useState(false); const [notice, setNotice] = useState(false); const loc = useLocation();
@@ -207,10 +211,12 @@ function Protected() {
   return <Shell><Routes>
     <Route path="/" element={<Dashboard data={data}/>}/>
     <Route path="/configurator" element={guard('configurator', <ConfiguratorPage/>)}/>
+    <Route path="/quotes" element={guard('quotes', <QuotesPage/>)}/>
     <Route path="/products" element={guard('products', <ProductsPage/>)}/>
     <Route path="/materials" element={guard('materials', <MaterialsPage/>)}/>
     <Route path="/customers" element={guard('customers', <CustomerPage/>)}/>
     <Route path="/orders" element={guard('orders', <OrdersPage/>)}/>
+    <Route path="/assembly" element={guard('assembly', <AssemblyPage/>)}/>
     <Route path="/discounts" element={guard('discounts', <DiscountsPage/>)}/>
     <Route path="/sales" element={guard('sales', <TablePage type="sales" data={data} refresh={refresh}/>)}/>
     <Route path="/expenses" element={guard('expenses', <TablePage type="expenses" data={data} refresh={refresh}/>)}/>

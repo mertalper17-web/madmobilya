@@ -46,11 +46,17 @@ export const useAuth = () => useContext(AuthCtx);
 
 // role-based access map
 export const ROLE_ACCESS = {
-  admin:     ['dashboard', 'configurator', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses', 'discounts', 'users'],
-  muhasebe:  ['dashboard', 'products', 'materials', 'customers', 'orders', 'sales', 'expenses', 'discounts'],
+  admin:     ['dashboard', 'configurator', 'products', 'materials', 'customers', 'orders', 'quotes', 'assembly', 'sales', 'expenses', 'discounts', 'users'],
+  muhasebe:  ['dashboard', 'configurator', 'products', 'materials', 'customers', 'orders', 'quotes', 'sales', 'expenses', 'discounts'],
   depo:      ['dashboard', 'materials', 'products', 'orders'],
   sevkiyat:  ['dashboard', 'orders', 'customers'],
-  montaj:    ['dashboard', 'orders'],
+  montaj:    ['dashboard', 'orders', 'assembly'],
+  bayi:      ['dashboard', 'configurator', 'quotes'],
 };
 
-export const canAccess = (user, key) => user && ROLE_ACCESS[user.role]?.includes(key);
+export const canAccess = (user, key) => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (Array.isArray(user.access) && user.access.length) return user.access.includes(key);
+  return !!ROLE_ACCESS[user.role]?.includes(key);
+};

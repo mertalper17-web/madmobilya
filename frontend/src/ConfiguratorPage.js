@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Sofa, ChefHat, Tv, BookOpen, Bed, Moon, Calculator, Save, RotateCcw, Zap } from 'lucide-react';
+import { Sofa, ChefHat, Tv, BookOpen, Bed, Moon, Calculator, Save, RotateCcw, Zap, FileText } from 'lucide-react';
 import './ConfiguratorPage.css';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -26,6 +26,10 @@ export default function ConfiguratorPage() {
   const [error, setError] = useState('');
   const [discounts, setDiscounts] = useState([]);
   const [discountId, setDiscountId] = useState('');
+  const [custName, setCustName] = useState('');
+  const [custPhone, setCustPhone] = useState('');
+  const [custAddr, setCustAddr] = useState('');
+  const [quoteSaved, setQuoteSaved] = useState('');
 
   useEffect(() => {
     axios.get(`${API}/configurator/templates`).then(r => setTemplates(r.data.templates));
@@ -78,6 +82,24 @@ export default function ConfiguratorPage() {
       setTimeout(() => setSaved(''), 5000);
     } catch (e) {
       setError(e.response?.data?.detail || 'Kayıt başarısız');
+    }
+  };
+
+  const saveQuote = async () => {
+    if (!selected || !name.trim()) { setError('Teklif adı gerekli'); return; }
+    setError('');
+    const disc = discounts.find(d => d.id === discountId);
+    try {
+      const r = await axios.post(`${API}/quotes`, {
+        name, customer_name: custName, customer_phone: custPhone, customer_address: custAddr,
+        product_type: selected.key, dims, options,
+        labor: Number(labor) || 0, margin: Number(margin) || 0,
+        discount_rate: disc ? Number(disc.rate) : 0, discount_name: disc?.name || '',
+      });
+      setQuoteSaved(`"${r.data.quote_no}" teklifi kaydedildi. Teklifler sayfasında PDF alabilir ve siparişe dönüştürebilirsiniz.`);
+      setTimeout(() => setQuoteSaved(''), 6000);
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Teklif kaydedilemedi');
     }
   };
 
@@ -195,8 +217,17 @@ export default function ConfiguratorPage() {
           </div>
 
           <div className="save-block">
-            <label>Ürün adı<input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: Ceviz Gardırop 200cm" data-testid="config-product-name"/></label>
-            <button className="primary full" onClick={save} data-testid="save-configured-product"><Save size={14}/> Ürünlere kaydet</button>
+            <label>Ürün / teklif adı<input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: Ceviz Gardırop 200cm" data-testid="config-product-name"/></label>
+            <div className="quote-cust-grid">
+              <label>Müşteri adı<input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Teklif için" data-testid="config-cust-name"/></label>
+              <label>Telefon<input value={custPhone} onChange={e => setCustPhone(e.target.value)} data-testid="config-cust-phone"/></label>
+            </div>
+            <label>Müşteri adresi<input value={custAddr} onChange={e => setCustAddr(e.target.value)} data-testid="config-cust-address"/></label>
+            <div className="save-btn-row">
+              <button className="primary full" onClick={saveQuote} data-testid="save-quote-button"><FileText size={14}/> Teklif olarak kaydet</button>
+              <button className="ghost-btn full" onClick={save} data-testid="save-configured-product"><Save size={14}/> Ürünlere kaydet</button>
+            </div>
+            {quoteSaved && <div className="order-banner ok" style={{ marginTop: 10 }} data-testid="config-quote-saved"><span>✓ {quoteSaved}</span></div>}
             <p className="save-hint"><Zap size={11}/> Kayıtlı ürünlerinizin maliyeti, malzeme fiyatı değiştikçe otomatik güncellenir.</p>
           </div>
         </> : <div className="empty" style={{ padding: '60px 20px' }}>Ölçü ve opsiyonları girin, maliyet burada canlı görünür.</div>}
