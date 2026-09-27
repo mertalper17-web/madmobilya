@@ -1,0 +1,43 @@
+{
+  "typography": {
+    "heading_font": "Plus Jakarta Sans, sans-serif",
+    "body_font": "Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace"
+  },
+  "colors": {
+    "archetype": "ORGANIC & EARTHY",
+    "primary": "#8B5A2B",
+    "secondary": "#3E2723",
+    "accent": "#D7CCC8",
+    "background_dark": "#121212",
+    "surface_dark": "#1E1E1E",
+    "border_dark": "rgba(255,255,255,0.1)",
+    "text_primary": "#F5F5F5",
+    "text_muted": "#A3A3A3"
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-[#1E1E1E]/80 border border-white/10",
+    "shadows": "shadow-[0_8px_32px_rgba(0,0,0,0.3)]",
+    "border_radius": "rounded-xl"
+  },
+  "component_path": "/app/frontend/src/components/",
+  "instructions_to_main_agent": "Build a comprehensive Furniture Manufacturing ERP & Analytics Dashboard (Mobilya Üretim ve Yönetim Paneli) in React.js with Tailwind CSS, Lucide icons, Recharts, and Sonner toasts. Ensure all interactive and info elements have data-testid attributes. Support Product & Recipe Management, Material Stock & Supplier Management, Automated Cost Calculation & Selling Price Recommendation, and Sales/Expense/Order Tracking.",
+  "image_urls": [
+    {
+      "category": "workshop",
+      "url": "https://images.unsplash.com/photo-1712171984530-e25a4aaa46dd?q=85&fm=jpg&crop=entropy&cs=srgb",
+      "description": "Craftsman finishing wooden table in atelier workshop"
+    },
+    {
+      "category": "wood_texture",
+      "url": "https://images.unsplash.com/photo-1546484396-fb3fc6f95f98?q=85&fm=jpg&crop=entropy&cs=srgb",
+      "description": "Minimalist dark wood texture background"
+    }
+  ],
+  "universal_guidelines": [
+    "Never use pure black #000000; use tinted dark greys like #121212 and #1E1E1E",
+    "Ensure all buttons and form inputs have hover and active states with proper contrast",
+    "Add data-testid attributes to all interactive elements",
+    "Use generous spacing (p-6, p-8) on container cards"
+  ]
+}
