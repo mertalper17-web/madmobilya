@@ -38,6 +38,24 @@ class Transaction(BaseModel):
     amount: float
     status: str = 'Tamamlandı'
 
+class CustomerCreate(BaseModel):
+    name: str
+    phone: str = ''
+    address: str = ''
+    tax_number: str = ''
+    notes: str = ''
+
+class CreditSale(BaseModel):
+    description: str
+    amount: float
+    due_date: str
+    promissory_no: str = ''
+
+class CustomerPayment(BaseModel):
+    amount: float
+    payment_method: str = 'Nakit'
+    note: str = ''
+
 async def docs(collection, limit=100):
     return await db[collection].find({}, {'_id': 0}).sort('created_at', -1).to_list(limit)
 
@@ -90,6 +108,55 @@ async def get_orders(): return await docs('orders')
 async def create_order(item: dict):
     doc = dict(item); doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
     await db.orders.insert_one(doc); return {k: v for k, v in doc.items() if k != '_id'}
+
+@api.get('/customers/summary')
+async def customer_summary():
+    customers = await docs('customers')
+    sales = await db.transactions.find({'type': 'credit_sale'}, {'_id': 0}).to_list(1000)
+    payments = await db.customer_payments.find({}, {'_id': 0}).to_list(1000)
+    result = []
+    for customer in customers:
+        cid = customer['id']
+        customer_sales = [x for x in sales if x.get('customer_id') == cid]
+        customer_payments = [x for x in payments if x.get('customer_id') == cid]
+        total_purchases = sum(x.get('amount', 0) for x in customer_sales)
+        total_paid = sum(x.get('amount', 0) for x in customer_payments)
+        result.append({**customer, 'total_purchases': total_purchases, 'total_paid': total_paid,
+                       'balance': max(total_purchases - total_paid, 0), 'purchase_count': len(customer_sales),
+                       'last_purchase': customer_sales[-1].get('date') if customer_sales else None})
+    return {'customers': result, 'stats': {'customer_count': len(result),
+             'open_balance': sum(x['balance'] for x in result),
+             'credit_sales': sum(x['total_purchases'] for x in result),
+             'payments': sum(x['total_paid'] for x in result)}}
+
+@api.post('/customers')
+async def create_customer(item: CustomerCreate):
+    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), created_at=datetime.now(timezone.utc).isoformat())
+    await db.customers.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != '_id'}
+
+@api.post('/customers/{customer_id}/credit-sales')
+async def create_credit_sale(customer_id: str, item: CreditSale):
+    customer = await db.customers.find_one({'id': customer_id}, {'_id': 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail='Müşteri bulunamadı')
+    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
+                                        type='credit_sale', sale_type='Senetli', status='Açık',
+                                        date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+                                        created_at=datetime.now(timezone.utc).isoformat())
+    await db.transactions.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != '_id'}
+
+@api.post('/customers/{customer_id}/payments')
+async def create_customer_payment(customer_id: str, item: CustomerPayment):
+    customer = await db.customers.find_one({'id': customer_id}, {'_id': 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail='Müşteri bulunamadı')
+    doc = item.model_dump(); doc.update(id=str(uuid.uuid4()), customer_id=customer_id, customer_name=customer['name'],
+                                        date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+                                        created_at=datetime.now(timezone.utc).isoformat())
+    await db.customer_payments.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != '_id'}
 
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','), allow_methods=['*'], allow_headers=['*'])
