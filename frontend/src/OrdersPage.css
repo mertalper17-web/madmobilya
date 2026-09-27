@@ -1,14 +1,13 @@
-.status-select{background:#332b21;color:#f5cc92;border:1px solid var(--line);border-radius:4px;padding:6px 8px;font-size:11px;outline:0}
+.status-select{background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold);border-radius:5px;padding:6px 10px;font-size:11px;outline:0;font-weight:600;cursor:pointer}
 .status-select:disabled{opacity:.7;cursor:not-allowed}
-.status-select.status-tamamlandı{background:#263d2d;color:#9acb9b;border-color:rgba(154,203,155,.3)}
-.status-select.status-i̇ptal,.status-select.status-iptal{background:#472d28;color:#f19883}
-.status-select.status-üretimde{background:#3d3325;color:#f5cc92}
-.order-banner{display:flex;align-items:center;gap:10px;padding:13px 18px;border-radius:6px;margin-bottom:18px;font-size:12px}
-.order-banner.warn{background:#3d3325;color:#f5cc92;border:1px solid #6a5432}
-.order-banner.ok{background:#263d2d;color:#9acb9b;border:1px solid #3f6a4a}
-.order-banner.err{background:#3a201d;color:#f5b09c;border:1px solid var(--coral)}
+.status-select.status-tamamlandı{background:var(--green-bg);color:var(--green);border-color:var(--green)}
+.status-select.status-i̇ptal,.status-select.status-iptal{background:var(--coral-bg);color:var(--coral);border-color:var(--coral)}
+.status-select.status-üretimde,.status-select.status-hazır{background:var(--gold-bg);color:var(--gold)}
+.order-banner{display:flex;align-items:center;gap:10px;padding:14px 18px;border-radius:8px;margin-bottom:18px;font-size:12px;font-weight:500}
+.order-banner.warn{background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold)}
+.order-banner.ok{background:var(--green-bg);color:var(--green);border:1px solid var(--green)}
+.order-banner.err{background:var(--coral-bg);color:var(--coral);border:1px solid var(--coral)}
 .order-banner>span{flex:1}
-.order-modal{width:min(500px,94vw);max-height:92vh;overflow-y:auto}
-.order-modal select{display:block;width:100%;margin-top:7px;background:#171613;border:1px solid var(--line);border-radius:4px;padding:11px;color:var(--text);outline:0;font-size:13px}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.order-banner .modal-close{background:transparent;border:0}
+.order-modal{width:min(520px,94vw);max-height:92vh;overflow-y:auto}
 @media(max-width:560px){.form-grid{grid-template-columns:1fr}}

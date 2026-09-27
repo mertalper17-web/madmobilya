@@ -24,15 +24,18 @@ function Shell({ children }) {
   const title = nav.find(x => x.to === loc.pathname)?.label || 'Genel Bakış';
   return <div className="app-shell">
     <aside className={open ? 'sidebar open' : 'sidebar'}>
-      <div className="brand"><div className="brand-mark">A</div><div><b>atölye<span>360</span></b><small>üretim yönetimi</small></div>
-        <button className="close-menu" onClick={() => setOpen(false)} data-testid="close-menu-button"><X size={18}/></button></div>
+      <div className="brand">
+        <img src="/logo.jpg" alt="MAD Mobilya" className="brand-logo" data-testid="brand-logo"/>
+        <div className="brand-text"><b>MAD<span> MOBİLYA</span></b><small>Kalite · Tasarım · Güven</small></div>
+        <button className="close-menu" onClick={() => setOpen(false)} data-testid="close-menu-button"><X size={18}/></button>
+      </div>
       <nav>{nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)} className={({ isActive }) => isActive ? 'active' : ''} data-testid={`nav-${label.toLowerCase().replaceAll(' ', '-').replaceAll('&', 'and')}`}><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
-      <div className="sidebar-foot"><div className="avatar">MK</div><div><b>Mobilya Atölyesi</b><small>Yönetici hesabı</small></div></div>
+      <div className="sidebar-foot"><div className="avatar">MM</div><div><b>MAD Mobilya</b><small>Yönetici hesabı</small></div></div>
     </aside>
     <main className="main">
       <header>
         <button className="menu-btn" onClick={() => setOpen(true)} data-testid="open-menu-button"><Menu/></button>
-        <div><p className="eyebrow">İŞLETME PANELİ</p><h1>{title}</h1></div>
+        <div><p className="eyebrow">MAD MOBİLYA · İŞLETME PANELİ</p><h1>{title}</h1></div>
         <div className="header-actions">
           <div className="search"><Search size={16}/><input placeholder="Ara..." data-testid="global-search-input"/></div>
           <button className="icon-btn" onClick={() => setNotice(!notice)} aria-label="Bildirimleri aç" data-testid="notifications-button"><Bell size={18}/><em/></button>
@@ -55,7 +58,7 @@ function Dashboard({ data }) {
   const t = data.transactions || [];
   return <>
     <section className="welcome">
-      <div><span className="tag">ATÖLYE PANELİ</span><h2>Günaydın, <span>Mehmet.</span></h2><p>Atölyenizde bugün neler oluyor, birlikte bakalım.</p></div>
+      <div><span className="tag">MAD MOBİLYA · KONTROL PANELİ</span><h2>Hoş geldiniz, <span>MAD Mobilya.</span></h2><p>Atölyenizin bugünkü performansına birlikte bakalım.</p></div>
       <img src="https://images.unsplash.com/photo-1712171984530-e25a4aaa46dd?q=85&fm=jpg&crop=entropy&cs=srgb" alt="Atölyede ahşap masa" data-testid="workshop-image"/>
     </section>
     <div className="stats">
