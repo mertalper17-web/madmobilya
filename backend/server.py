@@ -68,21 +68,6 @@ async def logout(response: Response):
 @api.get('/auth/me')
 async def me(user=Depends(current_user)):
     return user
-@api.get('/desktop-sync')
-async def desktop_sync(user=Depends(require_roles('admin', 'muhasebe', 'montaj'))):
-    """Read-only, authenticated snapshot for the Windows companion app."""
-    customers = await db.customers.find(
-        {}, {'_id': 0, 'id': 1, 'name': 1, 'phone': 1, 'address': 1, 'created_at': 1}
-    ).sort('created_at', -1).to_list(5000)
-    assembly = await db.assembly_jobs.find(
-        {}, {'_id': 0}
-    ).sort('created_at', -1).to_list(5000)
-    return {
-        'customers': customers,
-        'assembly': assembly,
-        'synced_at': datetime.now(timezone.utc).isoformat()
-    }
-
 # ---- user management (admin only) ----
 @api.get('/users')
 async def list_users(user=Depends(admin_only)):
